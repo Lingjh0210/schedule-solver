@@ -441,20 +441,27 @@ class ScheduleSolver:
                         '学生配套': ', '.join(students)
                     })
         
-        # 时段总表（分行显示，每个班级一行）
+        # 时段总表（分行显示，每个班级一行，避免重复）
         slot_schedule_data = []
         
         for group_name in sorted(self.SLOT_GROUPS.keys()):
             group_slots = self.SLOT_GROUPS[group_name]
             
-            # 找出该时段所有上课的班级
-            classes_in_slot = []
+            # 用集合记录已添加的班级，避免重复
+            added_classes = set()
             
-            for t in group_slots:
-                for k in self.subjects:
-                    for r in range(1, self.config['max_classes_per_subject'] + 1):
-                        if solver.Value(y_rt[(k, r, t)]) == 1:
-                            # 该班在这个时段上课
+            for k in self.subjects:
+                for r in range(1, self.config['max_classes_per_subject'] + 1):
+                    # 检查这个班级是否在该时段组的任意一个1小时时段上课
+                    is_active = any(solver.Value(y_rt[(k, r, t)]) == 1 for t in group_slots)
+                    
+                    if is_active:
+                        class_key = (k, r)
+                        # 避免重复添加
+                        if class_key not in added_classes:
+                            added_classes.add(class_key)
+                            
+                            # 获取该班级的学生配套
                             students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
                             size = sum(self.packages[p]['人数'] for p in students)
                             
@@ -467,7 +474,6 @@ class ScheduleSolver:
                                 '人数': size,
                                 '涉及配套': ', '.join(sorted(students))
                             })
-                            break  # 每个时段组只记录一次
         
         return class_details, slot_schedule_data
 
