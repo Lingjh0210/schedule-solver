@@ -441,38 +441,43 @@ class ScheduleSolver:
                         '学生配套': ', '.join(students)
                     })
         
-        # 时段总表
+        # 时段总表（分列显示）
         slot_schedule_data = []
+        
+        # 按科目排序
+        sorted_subjects = sorted(self.subjects)
+        # 按配套排序
+        sorted_packages = sorted(self.package_names)
+        
         for group_name in sorted(self.SLOT_GROUPS.keys()):
             group_slots = self.SLOT_GROUPS[group_name]
             row = {'时段': group_name, '时长': f'{len(group_slots)}h'}
             
-            # 找出该时段所有上课的班级
-            classes_in_slot = []
-            packages_in_slot = set()
-            
-            for t in group_slots:
-                for k in self.subjects:
+            # 为每个科目创建一列
+            for subject in sorted_subjects:
+                classes_info = []
+                for t in group_slots:
                     for r in range(1, self.config['max_classes_per_subject'] + 1):
-                        if solver.Value(y_rt[(k, r, t)]) == 1:
-                            # 该班在这个时段上课
-                            students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
+                        if solver.Value(y_rt[(subject, r, t)]) == 1:
+                            # 该科目的班级在这个时段上课
+                            students = [p for p in self.package_names if solver.Value(u_pkr[(p, subject, r)]) == 1]
                             size = sum(self.packages[p]['人数'] for p in students)
-                            class_info = f"{k}班{r}({size}人)"
-                            if class_info not in classes_in_slot:  # 避免重复
-                                classes_in_slot.append(class_info)
-                                packages_in_slot.update(students)
+                            classes_info.append(f"班{r}({size}人)")
+                
+                row[f'科目-{subject}'] = ', '.join(classes_info) if classes_info else '-'
             
-            # 找出空闲的配套（在这个时段没有课的配套）
-            all_packages = set(self.package_names)
-            free_packages = all_packages - packages_in_slot
-            
-            row['上课班级'] = ', '.join(classes_in_slot) if classes_in_slot else '-'
-            row['涉及配套'] = ', '.join(sorted(packages_in_slot)) if packages_in_slot else '-'
-            row['空闲配套'] = ', '.join(sorted(free_packages)) if free_packages else '-'
-            row['班级数'] = len(classes_in_slot)
-            row['上课配套数'] = len(packages_in_slot)
-            row['空闲配套数'] = len(free_packages)
+            # 为每个配套创建一列
+            for package in sorted_packages:
+                package_classes = []
+                for t in group_slots:
+                    for k in self.subjects:
+                        for r in range(1, self.config['max_classes_per_subject'] + 1):
+                            if solver.Value(y_rt[(k, r, t)]) == 1 and solver.Value(u_pkr[(package, k, r)]) == 1:
+                                # 该配套在这个时段上这门课
+                                package_classes.append(k)
+                                break  # 同一科目只记录一次
+                
+                row[f'配套-{package}'] = ', '.join(package_classes) if package_classes else '空闲'
             
             slot_schedule_data.append(row)
         
@@ -718,26 +723,41 @@ def main():
                         st.markdown('</div>', unsafe_allow_html=True)
                 
                 with tab2:
-                    st.markdown("### 🕐 时段总表（全局视图）")
-                    st.markdown("*显示每个时段有哪些班级在上课，哪些配套是空闲的*")
-                    df_slot = pd.DataFrame(sol['slot_schedule'])
-                    st.dataframe(df_slot, use_container_width=True)
+                    st.markdown("### 🕐 时段总表（分列显示）")
+                    st.markdown("*每个科目和配套单独成列，清晰显示每个时段的安排*")
                     
-                    # 统计空闲情况
-                    total_slots = len(df_slot)
-                    slots_with_free = sum(1 for row in sol['slot_schedule'] if row['空闲配套'] != '-')
-                    avg_free = sum(row['空闲配套数'] for row in sol['slot_schedule']) / total_slots if total_slots > 0 else 0
+                    df_slot = pd.DataFrame(sol['slot_schedule'])
+                    
+                    # 设置列的显示顺序：时段、时长、所有科目列、所有配套列
+                    basic_cols = ['时段', '时长']
+                    subject_cols = [col for col in df_slot.columns if col.startswith('科目-')]
+                    package_cols = [col for col in df_slot.columns if col.startswith('配套-')]
+                    ordered_cols = basic_cols + sorted(subject_cols) + sorted(package_cols)
+                    df_slot = df_slot[ordered_cols]
+                    
+                    # 显示表格（使用全宽度）
+                    st.dataframe(df_slot, use_container_width=True, height=600)
+                    
+                    # 统计信息
+                    st.markdown("---")
+                    st.markdown("### 📊 统计信息")
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
+                        total_slots = len(df_slot)
                         st.metric("总时段数", total_slots)
                     with col2:
-                        st.metric("有空闲配套的时段", slots_with_free)
+                        # 计算有开班的时段数（任意科目列不为'-'）
+                        active_slots = 0
+                        for _, row in df_slot.iterrows():
+                            if any(row[col] != '-' for col in subject_cols):
+                                active_slots += 1
+                        st.metric("有课时段数", active_slots)
                     with col3:
-                        st.metric("平均每时段空闲配套数", f"{avg_free:.1f}")
-                    
-                    if avg_free > 0:
-                        st.info(f"💡 提示：平均每个时段有{avg_free:.1f}个配套是空闲的，这些时段可以用于自习、活动等安排")
+                        # 计算平均每时段空闲配套数
+                        avg_free = sum(1 for _, row in df_slot.iterrows() 
+                                      for col in package_cols if row[col] == '空闲') / (len(df_slot) * len(package_cols)) * len(package_cols)
+                        st.metric("平均空闲配套数", f"{avg_free:.1f}")
                 
                 with tab3:
                     # 导出为Excel
