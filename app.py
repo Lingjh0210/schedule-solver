@@ -93,6 +93,7 @@ def parse_uploaded_file(uploaded_file):
         # 解析数据
         packages = {}
         subject_hours = {}
+        total_hours_stats = []
         
         for _, row in df.iterrows():
             package_name = str(row['配套']).strip()
@@ -101,6 +102,13 @@ def parse_uploaded_file(uploaded_file):
             
             # 解析科目字符串
             subjects = parse_subject_string(subject_str)
+            
+            # 计算该配套的总课时
+            total_hours = sum(subjects.values())
+            total_hours_stats.append({
+                '配套': package_name,
+                '总课时': total_hours
+            })
             
             packages[package_name] = {
                 '人数': student_count,
@@ -113,6 +121,21 @@ def parse_uploaded_file(uploaded_file):
                     subject_hours[subject] = hours
                 elif subject_hours[subject] != hours:
                     st.warning(f"⚠️ 科目'{subject}'的课时不一致: {subject_hours[subject]} vs {hours}")
+        
+        # 显示总课时统计
+        min_hours = min(s['总课时'] for s in total_hours_stats)
+        max_hours = max(s['总课时'] for s in total_hours_stats)
+        
+        if min_hours < 21:
+            st.info(f"ℹ️ 检测到部分配套总课时少于21小时（范围：{min_hours}-{max_hours}小时）")
+            st.success("✅ 系统支持总课时不足的配套，这些配套将在某些时段不上课")
+            
+            # 显示总课时不足的配套
+            short_packages = [s for s in total_hours_stats if s['总课时'] < 21]
+            if short_packages:
+                with st.expander("查看总课时不足21的配套"):
+                    for pkg in short_packages:
+                        st.text(f"  {pkg['配套']}: {pkg['总课时']}小时")
         
         return packages, subject_hours
     
@@ -401,30 +424,42 @@ class ScheduleSolver:
                         '学生配套': ', '.join(students)
                     })
         
-        # 配套课表
-        timetable_data = []
-        for p in self.package_names:
-            row = {'配套': p, '人数': self.packages[p]['人数']}
+        # 时段总表
+        slot_schedule_data = []
+        for group_name in sorted(self.SLOT_GROUPS.keys()):
+            group_slots = self.SLOT_GROUPS[group_name]
+            row = {'时段': group_name, '时长': f'{len(group_slots)}h'}
             
-            for group_name in sorted(self.SLOT_GROUPS.keys()):
-                group_slots = self.SLOT_GROUPS[group_name]
-                classes_in_group = []
-                for t in group_slots:
-                    for k in self.subjects:
-                        for r in range(1, self.config['max_classes_per_subject'] + 1):
-                            if solver.Value(x_prt[(p, k, r, t)]) == 1:
-                                classes_in_group.append(f"{k}班{r}")
-                
-                if len(classes_in_group) == 0:
-                    row[group_name] = '-'
-                elif len(classes_in_group) == 1:
-                    row[group_name] = classes_in_group[0]
-                else:
-                    row[group_name] = ' + '.join(classes_in_group) + ' ⚠️'
+            # 找出该时段所有上课的班级
+            classes_in_slot = []
+            packages_in_slot = set()
             
-            timetable_data.append(row)
+            for t in group_slots:
+                for k in self.subjects:
+                    for r in range(1, self.config['max_classes_per_subject'] + 1):
+                        if solver.Value(y_rt[(k, r, t)]) == 1:
+                            # 该班在这个时段上课
+                            students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
+                            size = sum(self.packages[p]['人数'] for p in students)
+                            class_info = f"{k}班{r}({size}人)"
+                            if class_info not in classes_in_slot:  # 避免重复
+                                classes_in_slot.append(class_info)
+                                packages_in_slot.update(students)
+            
+            # 找出空闲的配套（在这个时段没有课的配套）
+            all_packages = set(self.package_names)
+            free_packages = all_packages - packages_in_slot
+            
+            row['上课班级'] = ', '.join(classes_in_slot) if classes_in_slot else '-'
+            row['涉及配套'] = ', '.join(sorted(packages_in_slot)) if packages_in_slot else '-'
+            row['空闲配套'] = ', '.join(sorted(free_packages)) if free_packages else '-'
+            row['班级数'] = len(classes_in_slot)
+            row['上课配套数'] = len(packages_in_slot)
+            row['空闲配套数'] = len(free_packages)
+            
+            slot_schedule_data.append(row)
         
-        return class_details, timetable_data
+        return class_details, slot_schedule_data
 
 # ========== 主应用 ==========
 def main():
@@ -501,13 +536,22 @@ def main():
         **数据格式要求：**
         - 必须包含列：`配套`、`科目`、`人数`
         - 科目格式：`会计(6),历史(4),地理(4)` （科目名(课时数)，逗号分隔）
+        - ✅ **支持总课时不足21的配套**（这些配套在某些时段不上课）
         
         **示例：**
         ```
         配套 | 科目                              | 人数
-        P1  | 会计(6),历史(4),地理(4),商业(3)    | 24
-        P2  | 生物(4),会计(6),历史(4),商业(3)    | 5
+        P1  | 会计(6),历史(4),地理(4),商业(3)    | 24  (总17h)
+        P2  | 生物(4),会计(6),历史(4),商业(3)    | 5   (总17h)
+        P3  | 物理(6),化学(5)                    | 10  (总11h) ← 总课时少也没问题！
         ```
+        
+        **特色功能：**
+        - 🎯 自动生成多个优化方案
+        - 🔀 支持时段分割（一个时段上不同科目）
+        - 👨‍🏫 教师资源约束（同科目不同班不冲突）
+        - 📊 时段总表（查看每个时段的全局安排）
+        - ⏰ 灵活课时（配套总课时可以小于21）
         """)
         st.markdown('</div>', unsafe_allow_html=True)
         return
@@ -587,7 +631,7 @@ def main():
             if result['status'] == 'success':
                 result['name'] = sol_config['name']
                 result['analysis'] = solver_instance.analyze_solution(result)
-                result['class_details'], result['timetable'] = solver_instance.extract_timetable(result)
+                result['class_details'], result['slot_schedule'] = solver_instance.extract_timetable(result)
                 solutions.append(result)
         
         progress_bar.empty()
@@ -642,7 +686,7 @@ def main():
         # 方案详情
         for sol in st.session_state['solutions']:
             with st.expander(f"📋 {sol['name']} - 详细结果"):
-                tab1, tab2, tab3 = st.tabs(["开班详情", "配套课表", "数据导出"])
+                tab1, tab2, tab3 = st.tabs(["开班详情", "时段总表", "数据导出"])
                 
                 with tab1:
                     df_class = pd.DataFrame(sol['class_details'])
@@ -656,15 +700,33 @@ def main():
                         st.markdown('</div>', unsafe_allow_html=True)
                 
                 with tab2:
-                    df_timetable = pd.DataFrame(sol['timetable'])
-                    st.dataframe(df_timetable, use_container_width=True)
+                    st.markdown("### 🕐 时段总表（全局视图）")
+                    st.markdown("*显示每个时段有哪些班级在上课，哪些配套是空闲的*")
+                    df_slot = pd.DataFrame(sol['slot_schedule'])
+                    st.dataframe(df_slot, use_container_width=True)
+                    
+                    # 统计空闲情况
+                    total_slots = len(df_slot)
+                    slots_with_free = sum(1 for row in sol['slot_schedule'] if row['空闲配套'] != '-')
+                    avg_free = sum(row['空闲配套数'] for row in sol['slot_schedule']) / total_slots if total_slots > 0 else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("总时段数", total_slots)
+                    with col2:
+                        st.metric("有空闲配套的时段", slots_with_free)
+                    with col3:
+                        st.metric("平均每时段空闲配套数", f"{avg_free:.1f}")
+                    
+                    if avg_free > 0:
+                        st.info(f"💡 提示：平均每个时段有{avg_free:.1f}个配套是空闲的，这些时段可以用于自习、活动等安排")
                 
                 with tab3:
                     # 导出为Excel
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
                         pd.DataFrame(sol['class_details']).to_excel(writer, sheet_name='开班详情', index=False)
-                        pd.DataFrame(sol['timetable']).to_excel(writer, sheet_name='配套课表', index=False)
+                        pd.DataFrame(sol['slot_schedule']).to_excel(writer, sheet_name='时段总表', index=False)
                     
                     st.download_button(
                         label="📥 下载Excel文件",
