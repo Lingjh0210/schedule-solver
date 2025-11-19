@@ -88,7 +88,23 @@ def parse_uploaded_file(uploaded_file):
         if uploaded_file.name.endswith('.xlsx') or uploaded_file.name.endswith('.xls'):
             df = pd.read_excel(uploaded_file)
         else:
-            df = pd.read_csv(uploaded_file, encoding='utf-8')
+            # 尝试多种编码方式读取CSV
+            encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5', 'cp936', 'utf-8-sig']
+            df = None
+            last_error = None
+            
+            for encoding in encodings:
+                try:
+                    uploaded_file.seek(0)  # 重置文件指针
+                    df = pd.read_csv(uploaded_file, encoding=encoding)
+                    st.success(f"✅ 成功读取文件（编码：{encoding}）")
+                    break
+                except (UnicodeDecodeError, Exception) as e:
+                    last_error = e
+                    continue
+            
+            if df is None:
+                raise Exception(f"无法识别文件编码，请确保文件是有效的CSV格式。最后错误：{last_error}")
         
         # 解析数据
         packages = {}
