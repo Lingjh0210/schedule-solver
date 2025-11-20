@@ -514,8 +514,8 @@ class ScheduleSolver:
 
 # ========== 主应用 ==========
 def main():
-    st.markdown('<div class="main-header">📚 智能排课求解器 v3.6</div>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center; color: #666;">基于约束编程的走班制排课优化系统</p>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
+    st.markdown('<p style="text-align: center; color: #666;">排课搜索系统</p>', unsafe_allow_html=True)
     
     # 侧边栏
     with st.sidebar:
