@@ -371,17 +371,33 @@ class ScheduleSolver:
         if objective_type == 'min_classes':
             model.Minimize(total_classes * 100000 + slot_split_penalty + priority_penalty)
         elif objective_type == 'balanced':
-            class_sizes = []
+            # 修复：只对实际开班的班级计算min/max，避免包含未开班班级的0值
+            # 为每个班级创建"有效大小"变量
+            effective_sizes_for_max = []
+            effective_sizes_for_min = []
+            
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
-                    size = sum(self.packages[p]['人数'] * u_pkr[(p, k, r)] for p in self.package_names)
-                    class_sizes.append(size)
-            # 修复：min_size下界应该是min_class_size，且需要同时约束max和min
+                    actual_size = sum(self.packages[p]['人数'] * u_pkr[(p, k, r)] for p in self.package_names)
+                    
+                    # 有效大小（用于max）：如果开班则=实际大小，否则=0（不影响max）
+                    eff_size_max = model.NewIntVar(0, 200, f'eff_max_{k}_{r}')
+                    model.Add(eff_size_max == actual_size).OnlyEnforceIf(u_r[(k, r)])
+                    model.Add(eff_size_max == 0).OnlyEnforceIf(u_r[(k, r)].Not())
+                    effective_sizes_for_max.append(eff_size_max)
+                    
+                    # 有效大小（用于min）：如果开班则=实际大小，否则=200（不影响min）
+                    eff_size_min = model.NewIntVar(0, 200, f'eff_min_{k}_{r}')
+                    model.Add(eff_size_min == actual_size).OnlyEnforceIf(u_r[(k, r)])
+                    model.Add(eff_size_min == 200).OnlyEnforceIf(u_r[(k, r)].Not())
+                    effective_sizes_for_min.append(eff_size_min)
+            
+            # max_size = 所有开班班级中的最大值
+            # min_size = 所有开班班级中的最小值
             max_size = model.NewIntVar(0, 200, 'max_size')
-            min_size = model.NewIntVar(self.config['min_class_size'], 200, 'min_size')
-            # 使用更高效的约束方式
-            model.AddMaxEquality(max_size, class_sizes)
-            model.AddMinEquality(min_size, class_sizes)
+            min_size = model.NewIntVar(0, 200, 'min_size')
+            model.AddMaxEquality(max_size, effective_sizes_for_max)
+            model.AddMinEquality(min_size, effective_sizes_for_min)
             model.Minimize(total_classes * 1000000 + slot_split_penalty * 100 + (max_size - min_size) * 1000 + priority_penalty)
         
         return model, {'u_r': u_r, 'y_rt': y_rt, 'u_pkr': u_pkr, 'x_prt': x_prt}
@@ -527,13 +543,16 @@ class ScheduleSolver:
                             students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
                             size = sum(self.packages[p]['人数'] for p in students)
                             
+                            # 计算该班级在该时段组中实际上课的小时数（重要：处理时段分割）
+                            actual_hours = sum(1 for t in group_slots if solver.Value(y_rt[(k, r, t)]) == 1)
+                            
                             # 配套也使用自然排序
                             students_sorted = sorted(students, key=natural_sort_key)
                             
                             # 每个班级一行
                             slot_schedule_data.append({
                                 '时段': group_name,
-                                '时长': f'{len(group_slots)}h',
+                                '时长': f'{actual_hours}h',  # 显示该科目实际上课时长，而非整个时段组长度
                                 '科目': k,
                                 '班级': f'班{r}',
                                 '人数': size,
@@ -617,9 +636,9 @@ def main():
         **数据格式要求：**
         - 必须包含列：`配套`、`科目`、`人数`
         - 科目格式：`会计(6),历史(4),地理(4)` 或 `会计（6）,历史（4）`
+
         
-        
-        **功能：**
+        **特色功能：**
         - 🎯 自动生成多个优化方案
         - 🔀 支持时段分割（一个时段上不同科目）
         - 👨‍🏫 教师资源约束（同科目不同班不冲突）
