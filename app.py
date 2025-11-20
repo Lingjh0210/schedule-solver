@@ -624,7 +624,7 @@ def main():
             total_capacity = (recommended_slots - 1) * 2 + 3
             
             st.markdown(f"""
-            <div style="background-color: #e3f2fd; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1rem 0;">
+            <div style="padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1rem 0;">
                 <strong>📊 智能分析</strong><br>
                 • 最大总课时：<strong>{max_hours}小时</strong><br>
                 • 推荐时段组数：<strong>{recommended_slots}组</strong> (总容量{total_capacity}小时)<br>
