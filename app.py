@@ -67,6 +67,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ========== 工具函数 ==========
+def natural_sort_key(s):
+    """自然排序的key函数，用于正确排序包含数字的字符串
+    例如: S1, S2, S3, ..., S9, S10, S11 (而不是 S1, S10, S11, S2)
+    """
+    import re
+    return [int(text) if text.isdigit() else text.lower() 
+            for text in re.split(r'(\d+)', str(s))]
+
 def parse_subject_string(subject_str):
     """解析科目字符串（支持中英文括号）
     输入: "会计(6),历史(4),地理(4),商业(3)" 或 "会计（6）,历史（4）"
@@ -285,9 +293,26 @@ class ScheduleSolver:
             if k in self.subjects:
                 model.Add(sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1)) == count)
         
-        # 时段分割惩罚
+        # 时段分割处理
         slot_split_penalty = 0
-        if self.config['allow_slot_split']:
+        
+        if not self.config['allow_slot_split']:
+            # 不允许时段分割：添加硬约束
+            # 每个配套在每个时段组最多只能上一门课
+            for p in self.package_names:
+                for group_name, group_slots in self.SLOT_GROUPS.items():
+                    subjects_in_group = []
+                    for k in self.subjects:
+                        for r in range(1, self.config['max_classes_per_subject'] + 1):
+                            has_subject = model.NewBoolVar(f'has_{p}_{k}_{r}_{group_name}')
+                            model.AddMaxEquality(has_subject, [x_prt[(p, k, r, t)] for t in group_slots])
+                            subjects_in_group.append(has_subject)
+                    
+                    # 硬约束：每个时段组最多一门课
+                    model.Add(sum(subjects_in_group) <= 1)
+        
+        else:
+            # 允许时段分割：添加软惩罚，尽量减少分割
             split_vars = []
             for p in self.package_names:
                 for group_name, group_slots in self.SLOT_GROUPS.items():
@@ -304,6 +329,7 @@ class ScheduleSolver:
                     model.Add(num_subjects <= 1).OnlyEnforceIf(is_split.Not())
                     split_vars.append(is_split)
             
+            # 软惩罚：减少分割次数
             slot_split_penalty = sum(split_vars) * self.config['slot_split_penalty']
         
         # 目标函数
@@ -431,20 +457,26 @@ class ScheduleSolver:
                         group = self.SLOT_TO_GROUP[t]
                         slot_groups_used[group].append(t)
                     
-                    slot_str = ', '.join([f"{g}({len(slots)}h)" for g, slots in sorted(slot_groups_used.items())])
+                    # 使用自然排序显示时段
+                    slot_str = ', '.join([f"{g}({len(slots)}h)" 
+                                         for g, slots in sorted(slot_groups_used.items(), key=lambda x: natural_sort_key(x[0]))])
+                    
+                    # 配套也使用自然排序
+                    students_sorted = sorted(students, key=natural_sort_key)
                     
                     class_details.append({
                         '科目': k,
                         '班级': f'班{r}',
                         '人数': size,
                         '时段': slot_str,
-                        '学生配套': ', '.join(students)
+                        '学生配套': ', '.join(students_sorted)
                     })
         
         # 时段总表（分行显示，每个班级一行，避免重复）
         slot_schedule_data = []
         
-        for group_name in sorted(self.SLOT_GROUPS.keys()):
+        # 使用自然排序，确保S1, S2, ..., S9, S10, S11的正确顺序
+        for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
             group_slots = self.SLOT_GROUPS[group_name]
             
             # 用集合记录已添加的班级，避免重复
@@ -465,6 +497,9 @@ class ScheduleSolver:
                             students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
                             size = sum(self.packages[p]['人数'] for p in students)
                             
+                            # 配套也使用自然排序
+                            students_sorted = sorted(students, key=natural_sort_key)
+                            
                             # 每个班级一行
                             slot_schedule_data.append({
                                 '时段': group_name,
@@ -472,7 +507,7 @@ class ScheduleSolver:
                                 '科目': k,
                                 '班级': f'班{r}',
                                 '人数': size,
-                                '涉及配套': ', '.join(sorted(students))
+                                '涉及配套': ', '.join(students_sorted)
                             })
         
         return class_details, slot_schedule_data
@@ -744,8 +779,37 @@ def main():
                     # 导出为Excel
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        pd.DataFrame(sol['class_details']).to_excel(writer, sheet_name='开班详情', index=False)
-                        pd.DataFrame(sol['slot_schedule']).to_excel(writer, sheet_name='时段总表', index=False)
+                        # 写入数据
+                        df_class = pd.DataFrame(sol['class_details'])
+                        df_slot = pd.DataFrame(sol['slot_schedule'])
+                        
+                        df_class.to_excel(writer, sheet_name='开班详情', index=False)
+                        df_slot.to_excel(writer, sheet_name='时段总表', index=False)
+                        
+                        # 自动调整列宽
+                        workbook = writer.book
+                        
+                        # 调整开班详情的列宽
+                        worksheet1 = writer.sheets['开班详情']
+                        for idx, col in enumerate(df_class.columns):
+                            # 计算列宽：取列名长度和该列最大值长度的较大者
+                            max_length = max(
+                                len(str(col)),  # 列名长度
+                                df_class[col].astype(str).str.len().max()  # 列内容最大长度
+                            )
+                            # 设置列宽（加上一些余量）
+                            adjusted_width = min(max_length + 2, 50)  # 最大50字符
+                            worksheet1.column_dimensions[chr(65 + idx)].width = adjusted_width
+                        
+                        # 调整时段总表的列宽
+                        worksheet2 = writer.sheets['时段总表']
+                        for idx, col in enumerate(df_slot.columns):
+                            max_length = max(
+                                len(str(col)),
+                                df_slot[col].astype(str).str.len().max()
+                            )
+                            adjusted_width = min(max_length + 2, 50)
+                            worksheet2.column_dimensions[chr(65 + idx)].width = adjusted_width
                     
                     st.download_button(
                         label="📥 下载Excel文件",
