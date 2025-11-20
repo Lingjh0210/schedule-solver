@@ -13,6 +13,7 @@ import io
 import time
 from ortools.sat.python import cp_model
 from collections import defaultdict
+from openpyxl.utils import get_column_letter
 
 # 页面配置
 st.set_page_config(
@@ -140,12 +141,38 @@ def parse_uploaded_file(uploaded_file):
                 '科目': subjects
             }
             
-            # 收集所有科目的课时
+            # 收集所有科目的课时（强制要求一致性）
             for subject, hours in subjects.items():
                 if subject not in subject_hours:
                     subject_hours[subject] = hours
                 elif subject_hours[subject] != hours:
-                    st.warning(f"⚠️ 科目'{subject}'的课时不一致: {subject_hours[subject]} vs {hours}")
+                    # 严重错误：课时不一致会导致约束冲突
+                    st.error(f"❌ **数据错误：科目'{subject}'的课时不一致！**")
+                    st.error(f"   • 在某些配套中是 **{subject_hours[subject]}小时**")
+                    st.error(f"   • 在'{package_name}'配套中是 **{hours}小时**")
+                    st.markdown("---")
+                    st.markdown("""
+                    ### 🔍 为什么会导致错误？
+                    
+                    系统会为每个科目创建**统一长度**的班级（如6小时的会计班）。
+                    所有学生都会被分配到这些统一的班级中。
+                    
+                    如果配套A需要6小时会计，配套B需要4小时会计：
+                    - ❌ 无法用6小时的班满足4小时的需求
+                    - ❌ 也无法用4小时的班满足6小时的需求
+                    - ❌ 导致求解器找不到可行解
+                    
+                    ### ✅ 解决方案：
+                    
+                    **方案1：统一课时（推荐）**
+                    - 将所有配套的'{subject}'课时改为相同值（如都改为6小时或都改为4小时）
+                    
+                    **方案2：分离科目**
+                    - 将4小时的会计命名为"会计基础"
+                    - 将6小时的会计命名为"会计进阶"
+                    - 这样系统会将它们视为不同科目
+                    """)
+                    return None, None
         
         # 显示总课时统计
         min_hours = min(s['总课时'] for s in total_hours_stats)
@@ -334,8 +361,9 @@ class ScheduleSolver:
         
         # 目标函数
         total_classes = sum(u_r[(k, r)] for k in self.subjects for r in range(1, self.config['max_classes_per_subject'] + 1))
+        # 修复：使用max(0, ...)避免负惩罚，当选修人数>100时惩罚为0而非负数
         priority_penalty = sum(
-            u_r[(k, r)] * r * (100 - self.subject_enrollment[k])
+            u_r[(k, r)] * r * max(0, 100 - self.subject_enrollment[k])
             for k in self.subjects 
             for r in range(1, self.config['max_classes_per_subject'] + 1)
         )
@@ -348,10 +376,12 @@ class ScheduleSolver:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
                     size = sum(self.packages[p]['人数'] * u_pkr[(p, k, r)] for p in self.package_names)
                     class_sizes.append(size)
+            # 修复：min_size下界应该是min_class_size，且需要同时约束max和min
             max_size = model.NewIntVar(0, 200, 'max_size')
-            min_size = model.NewIntVar(0, 200, 'min_size')
-            for size in class_sizes:
-                model.Add(max_size >= size)
+            min_size = model.NewIntVar(self.config['min_class_size'], 200, 'min_size')
+            # 使用更高效的约束方式
+            model.AddMaxEquality(max_size, class_sizes)
+            model.AddMinEquality(min_size, class_sizes)
             model.Minimize(total_classes * 1000000 + slot_split_penalty * 100 + (max_size - min_size) * 1000 + priority_penalty)
         
         return model, {'u_r': u_r, 'y_rt': y_rt, 'u_pkr': u_pkr, 'x_prt': x_prt}
@@ -515,7 +545,7 @@ class ScheduleSolver:
 # ========== 主应用 ==========
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center; color: #666;">排课搜索系统</p>', unsafe_allow_html=True)
+    st.markdown('<p style="text-align: center; color: #666;">走班制排课搜索系统</p>', unsafe_allow_html=True)
     
     # 侧边栏
     with st.sidebar:
@@ -576,7 +606,7 @@ def main():
     if 'packages' not in st.session_state:
         st.markdown('<div class="info-box">', unsafe_allow_html=True)
         st.markdown("""
-        ### 用智能排课求解器
+        ### 👋 欢迎使用智能排课求解器！
         
         **使用步骤：**
         1. 📁 在左侧上传配套数据文件（Excel或CSV格式）
@@ -792,7 +822,8 @@ def main():
                             )
                             # 设置列宽（加上一些余量）
                             adjusted_width = min(max_length + 2, 50)  # 最大50字符
-                            worksheet1.column_dimensions[chr(65 + idx)].width = adjusted_width
+                            # 使用get_column_letter处理任意列数，避免超过26列时出错
+                            worksheet1.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
                         
                         # 调整时段总表的列宽
                         worksheet2 = writer.sheets['时段总表']
@@ -802,7 +833,8 @@ def main():
                                 df_slot[col].astype(str).str.len().max()
                             )
                             adjusted_width = min(max_length + 2, 50)
-                            worksheet2.column_dimensions[chr(65 + idx)].width = adjusted_width
+                            # 使用get_column_letter处理任意列数，避免超过26列时出错
+                            worksheet2.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
                     
                     st.download_button(
                         label="📥 下载Excel文件",
