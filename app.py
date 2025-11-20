@@ -563,7 +563,7 @@ class ScheduleSolver:
 
 # ========== 主应用 ==========
 def main():
-    st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">📚 智能排课搜索器</div>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #666;">走班制排课搜索系统</p>', unsafe_allow_html=True)
     
     # 侧边栏
@@ -625,7 +625,7 @@ def main():
     if 'packages' not in st.session_state:
         st.markdown('<div class="info-box">', unsafe_allow_html=True)
         st.markdown("""
-        ### 👋 欢迎使用智能排课求解器！
+        ### 智能排课搜索器详情
         
         **使用步骤：**
         1. 📁 在左侧上传配套数据文件（Excel或CSV格式）
