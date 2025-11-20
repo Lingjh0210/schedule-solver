@@ -172,7 +172,7 @@ def parse_uploaded_file(uploaded_file):
                     - 将6小时的会计命名为"会计进阶"
                     - 这样系统会将它们视为不同科目
                     """)
-                    return None, None
+                    return None, None, None
         
         # 显示总课时统计
         min_hours = min(s['总课时'] for s in total_hours_stats)
@@ -189,11 +189,11 @@ def parse_uploaded_file(uploaded_file):
                     for pkg in short_packages:
                         st.text(f"  {pkg['配套']}: {pkg['总课时']}小时")
         
-        return packages, subject_hours
+        return packages, subject_hours, max_hours
     
     except Exception as e:
         st.error(f"❌ 文件解析失败: {str(e)}")
-        return None, None
+        return None, None, None
 
 def calculate_subject_enrollment(packages):
     """计算每个科目的总选修人数"""
@@ -202,6 +202,28 @@ def calculate_subject_enrollment(packages):
         for subject in p_data['科目'].keys():
             enrollment[subject] += p_data['人数']
     return dict(enrollment)
+
+def calculate_recommended_slots(max_total_hours):
+    """根据最大总课时计算推荐的时段组数
+    
+    时段组结构：前(n-1)个时段组各2小时，最后1个时段组3小时
+    总容量 = (n-1)*2 + 3 = 2n+1 小时
+    
+    参数:
+        max_total_hours: 所有配套中的最大总课时
+    
+    返回:
+        推荐的时段组数
+    """
+    import math
+    # 如果最大课时<=3，至少需要1个时段组（3小时）
+    if max_total_hours <= 3:
+        return 1
+    # 否则计算需要的时段组数：n = ceil((max_hours - 1) / 2)
+    # 这样总容量 2n+1 >= max_hours
+    recommended = math.ceil((max_total_hours - 1) / 2)
+    # 至少2个时段组，最多20个
+    return max(2, min(recommended, 20))
 
 # ========== 排课求解器核心 ==========
 class ScheduleSolver:
@@ -563,7 +585,7 @@ class ScheduleSolver:
 
 # ========== 主应用 ==========
 def main():
-    st.markdown('<div class="main-header">📚 智能排课搜索器</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #666;">走班制排课搜索系统</p>', unsafe_allow_html=True)
     
     # 侧边栏
@@ -579,12 +601,13 @@ def main():
         
         if uploaded_file:
             with st.spinner("正在解析文件..."):
-                packages, subject_hours = parse_uploaded_file(uploaded_file)
+                packages, subject_hours, max_hours = parse_uploaded_file(uploaded_file)
             
             if packages and subject_hours:
                 st.success(f"✅ 成功加载 {len(packages)} 个配套，{len(subject_hours)} 个科目")
                 st.session_state['packages'] = packages
                 st.session_state['subject_hours'] = subject_hours
+                st.session_state['max_total_hours'] = max_hours  # 保存最大总课时
         
         st.markdown("---")
         
@@ -593,8 +616,36 @@ def main():
         min_class_size = st.number_input("最小班额", min_value=1, max_value=100, value=5, step=1)
         max_class_size = st.number_input("最大班额", min_value=1, max_value=200, value=60, step=1)
         max_classes_per_subject = st.number_input("每科目最大班数", min_value=1, max_value=10, value=3, step=1)
-        num_slots = st.number_input("时段组数量", min_value=5, max_value=20, value=10, step=1, 
-                                   help="最后一个时段组为3小时，其余为2小时")
+        
+        # 智能推荐时段组数
+        if 'max_total_hours' in st.session_state:
+            max_hours = st.session_state['max_total_hours']
+            recommended_slots = calculate_recommended_slots(max_hours)
+            total_capacity = (recommended_slots - 1) * 2 + 3
+            
+            st.markdown(f"""
+            <div style="background-color: #e3f2fd; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1rem 0;">
+                <strong>📊 智能分析</strong><br>
+                • 最大总课时：<strong>{max_hours}小时</strong><br>
+                • 推荐时段组数：<strong>{recommended_slots}组</strong> (总容量{total_capacity}小时)<br>
+                • 说明：{recommended_slots-1}组×2小时 + 1组×3小时 = {total_capacity}小时
+            </div>
+            """, unsafe_allow_html=True)
+            
+            default_slots = recommended_slots
+        else:
+            default_slots = 10
+            st.info("💡 上传数据后将自动推荐时段组数")
+        
+        num_slots = st.number_input(
+            "时段组数量", 
+            min_value=1, 
+            max_value=20, 
+            value=default_slots, 
+            step=1,
+            help="系统会根据数据自动推荐，也可手动调整。最后一个时段组为3小时，其余为2小时"
+        )
+        
         solver_timeout = st.number_input("求解超时(秒)", min_value=10, max_value=600, value=120, step=10)
         
         st.markdown("---")
@@ -625,7 +676,7 @@ def main():
     if 'packages' not in st.session_state:
         st.markdown('<div class="info-box">', unsafe_allow_html=True)
         st.markdown("""
-        ### 智能排课搜索器详情
+        ### 智能排课搜索器！
         
         **使用步骤：**
         1. 📁 在左侧上传配套数据文件（Excel或CSV格式）
@@ -637,7 +688,8 @@ def main():
         - 必须包含列：`配套`、`科目`、`人数`
         - 科目格式：`会计(6),历史(4),地理(4)` 或 `会计（6）,历史（4）`
 
-        
+    
+    
         **功能：**
         - 🎯 自动生成多个优化方案
         - 🔀 支持时段分割（一个时段上不同科目）
