@@ -761,15 +761,45 @@ def main():
             {'type': 'balanced', 'name': '方案B：均衡班额'}
         ]
         
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+        # 创建进度条容器
+        progress_container = st.container()
+        with progress_container:
+            progress_bar = st.progress(0)
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                status_text = st.empty()
+            with col2:
+                percentage_text = st.empty()
         
         solutions = []
+        total_steps = len(solution_configs) * 3  # 每个方案3个步骤：准备、建模、求解
+        current_step = 0
+        
         for i, sol_config in enumerate(solution_configs):
-            status_text.text(f"正在生成{sol_config['name']}...")
-            progress_bar.progress((i + 1) / len(solution_configs))
+            # 步骤1: 准备阶段
+            current_step += 1
+            progress = current_step / total_steps
+            progress_bar.progress(progress)
+            status_text.markdown(f"🔄 **{sol_config['name']}** - 准备中...")
+            percentage_text.markdown(f"**{int(progress * 100)}%**")
+            time.sleep(0.1)  # 短暂延迟使进度可见
+            
+            # 步骤2: 建模阶段
+            current_step += 1
+            progress = current_step / total_steps
+            progress_bar.progress(progress)
+            status_text.markdown(f"🏗️ **{sol_config['name']}** - 构建模型...")
+            percentage_text.markdown(f"**{int(progress * 100)}%**")
             
             model, variables = solver_instance.build_model(sol_config['type'])
+            
+            # 步骤3: 求解阶段
+            current_step += 1
+            progress = current_step / total_steps
+            progress_bar.progress(progress)
+            status_text.markdown(f"⚙️ **{sol_config['name']}** - 正在求解...")
+            percentage_text.markdown(f"**{int(progress * 100)}%**")
+            
             result = solver_instance.solve(model, variables, solver_timeout)
             
             if result['status'] == 'success':
@@ -777,9 +807,18 @@ def main():
                 result['analysis'] = solver_instance.analyze_solution(result)
                 result['class_details'], result['slot_schedule'] = solver_instance.extract_timetable(result)
                 solutions.append(result)
+                status_text.markdown(f"✅ **{sol_config['name']}** - 完成")
         
+        # 完成后显示100%
+        progress_bar.progress(1.0)
+        percentage_text.markdown("**100%**")
+        status_text.markdown("🎉 **所有方案求解完成！**")
+        time.sleep(0.5)
+        
+        # 清空进度条
         progress_bar.empty()
         status_text.empty()
+        percentage_text.empty()
         
         if not solutions:
             st.markdown('<div class="error-box">', unsafe_allow_html=True)
