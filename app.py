@@ -597,7 +597,7 @@ def main():
         # 下载模板功能
         st.markdown("##### 📥 下载数据模板")
         st.markdown("""
-        <div style="padding: 0.5rem; background-color: #e3f2fd; border-radius: 0.3rem; margin-bottom: 0.5rem; font-size: 0.85rem;">
+        <div style="padding: 0.5rem; border-radius: 0.3rem; margin-bottom: 0.5rem; font-size: 0.85rem;">
         💡 首次使用？下载示例模板了解数据格式
         </div>
         """, unsafe_allow_html=True)
