@@ -1207,11 +1207,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         df_overview['科目 & 班级'] = df_overview['科目'] + df_overview['班级'].str.replace('班', '')
                         
                         #  - 只保留合并后的列、人数和配套
-                        df_overview = df_overview[['科目 & 班级', '人数', '学生配套']]
+                        df_overview = df_overview[['科目 & 班级', '学生配套']]
                         #  - 重命名配套列
-                        df_overview.columns = ['科目 & 班级', '人数', '涉及配套']
+                        df_overview.columns = ['科目 SUBJECT',  '配套 PACKAGE']
                         
-                        df_overview.to_excel(writer, sheet_name='所有班级及涉及的配套', index=False)
+                        df_overview.to_excel(writer, sheet_name='导入', index=False)
                         
                         # === 自动调整列宽逻辑 ===
                         workbook = writer.book
