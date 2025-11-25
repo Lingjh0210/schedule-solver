@@ -505,13 +505,12 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据（最终优化版）
+        提取课表数据（排序优化版）
         1. 班级命名：按人数降序命名为 A, B, C...
-        2. 时段总表：执行"配对合并"策略。
-           如果S1时段(2h)内，有一个"化学(1h)"在前半段，一个"地理(1h)"在后半段，
-           则将它们合并为一行："化学(1h)+地理(1h)"，配套也对应合并："P1,P2 + P3,P4"。
+        2. 排序强制：开班详情列表强制按 科目+班级(A<B) 排序
+        3. 时段总表：执行"配对合并"策略
         """
-        import itertools # 需要导入这个库用于配对
+        import itertools
         
         solver = result['solver']
         u_r = result['variables']['u_r']
@@ -535,7 +534,7 @@ class ScheduleSolver:
                 new_name = f"班{chr(65 + index)}"
                 class_name_map[(k, item['r'])] = new_name
 
-        # ========== 第二步：生成开班详情 (保持不变) ==========
+        # ========== 第二步：生成开班详情 ==========
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -562,33 +561,28 @@ class ScheduleSolver:
                         '学生配套': ', '.join(students_sorted)
                     })
         
+        # [核心修改] 强制排序：先按科目名，再按班级名(班A < 班B)
+        # 这样在 tab1 显示时，A班一定在 B班前面
+        class_details.sort(key=lambda x: (x['科目'], x['班级']))
+
         # ========== 第三步：生成时段总表 (前后半段配对合并) ==========
         slot_schedule_data = []
         
-        # 按自然顺序遍历每个时段组 (S1, S2, ...)
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
             group_slots = self.SLOT_GROUPS[group_name]
-            # 获取该时段组的起始时间点（前半段）
             first_slot_idx = group_slots[0] 
             
-            # 准备三个桶：
-            # 1. full_items: 占满了整个时段组的课（2h或3h）
-            # 2. first_half_items: 只占了前半段的课（1h）
-            # 3. second_half_items: 只占了后半段的课（1h）
             full_items = []
             first_half_items = []
             second_half_items = []
             
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
-                    # 检查该班级在这个时段组的所有时间点
                     active_slots_in_group = [t for t in group_slots if solver.Value(y_rt[(k, r, t)]) == 1]
                     actual_hours = len(active_slots_in_group)
                     
-                    if actual_hours == 0:
-                        continue
+                    if actual_hours == 0: continue
                         
-                    # 收集信息
                     students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
                     size = sum(self.packages[p]['人数'] for p in students)
                     students_str = ', '.join(sorted(students, key=natural_sort_key))
@@ -596,26 +590,20 @@ class ScheduleSolver:
                     
                     item_data = {
                         'subject': f"{k}({actual_hours}h)",
-                        'class_name': f"{k}{display_name}", # 例如：化学班A
+                        'class_name': f"{k}{display_name}", 
                         'packages': students_str,
                         'size': size,
                         'raw_hours': actual_hours
                     }
                     
-                    # 分类逻辑
                     if actual_hours == len(group_slots):
-                        # 占满全时段
                         full_items.append(item_data)
                     elif first_slot_idx in active_slots_in_group:
-                        # 包含第一个时间点 -> 前半段
                         first_half_items.append(item_data)
                     else:
-                        # 不包含第一个时间点 -> 后半段
                         second_half_items.append(item_data)
             
-            # --- 开始生成行 ---
-            
-            # 1. 先添加占满全时段的（无需合并）
+            # 1. 占满全时段
             for item in full_items:
                 slot_schedule_data.append({
                     '时段': group_name,
@@ -626,33 +614,21 @@ class ScheduleSolver:
                     '涉及配套': item['packages']
                 })
                 
-            # 2. 配对合并前半段和后半段 (Zip Pair)
-            # 按人数排序，尽量让大课和大课配对，看起来整齐
+            # 2. 配对合并
             first_half_items.sort(key=lambda x: -x['size'])
             second_half_items.sort(key=lambda x: -x['size'])
             
-            # 使用 zip_longest 进行配对
-            # 如果其中一个列表较长，较短的那个会配对 None
             for item1, item2 in itertools.zip_longest(first_half_items, second_half_items):
                 if item1 and item2:
-                    # 成功配对！合并显示
-                    merged_subject = f"{item1['subject']} + {item2['subject']}"
-                    merged_class = f"{item1['class_name']} + {item2['class_name']}"
-                    merged_packages = f"{item1['packages']} + {item2['packages']}"
-                    total_hours = item1['raw_hours'] + item2['raw_hours']
-                    total_size = item1['size'] + item2['size'] # 人数相加
-                    # 或者显示为 "5+8" 也可以，这里选择显示总人数
-                    
                     slot_schedule_data.append({
                         '时段': group_name,
-                        '时长': f"{total_hours}h", # 通常是 2h
-                        '科目': merged_subject,
-                        '班级': merged_class,
-                        '人数': f"{item1['size']}+{item2['size']}", # 显示明细人数 5+8
-                        '涉及配套': merged_packages
+                        '时长': f"{item1['raw_hours'] + item2['raw_hours']}h",
+                        '科目': f"{item1['subject']} + {item2['subject']}",
+                        '班级': f"{item1['class_name']} + {item2['class_name']}",
+                        '人数': f"{item1['size']}+{item2['size']}",
+                        '涉及配套': f"{item1['packages']} + {item2['packages']}"
                     })
                 elif item1:
-                    # 只有前半段，没有配对的后半段
                     slot_schedule_data.append({
                         '时段': group_name,
                         '时长': f"{item1['raw_hours']}h",
@@ -662,7 +638,6 @@ class ScheduleSolver:
                         '涉及配套': item1['packages']
                     })
                 elif item2:
-                    # 只有后半段，没有配对的前半段
                     slot_schedule_data.append({
                         '时段': group_name,
                         '时长': f"{item2['raw_hours']}h",
@@ -1210,39 +1185,48 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     # 导出为Excel
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        # 写入数据
+                        # 获取数据
                         df_class = pd.DataFrame(sol['class_details'])
                         df_slot = pd.DataFrame(sol['slot_schedule'])
                         
+                        # [重要] 确保开班详情按 科目 -> 班级(A,B) 排序
+                        df_class = df_class.sort_values(by=['科目', '班级'])
+                        
+                        # 1. 写入 "开班详情" Sheet
                         df_class.to_excel(writer, sheet_name='开班详情', index=False)
+                        
+                        # 2. 写入 "时段总表" Sheet
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
-                        # 自动调整列宽
+                        # 3. [新增] 写入 "所有班级及涉及的配套" Sheet
+                        # 提取所需列，并确保排序正确 (df_class 已经排好序了)
+                        df_packages_overview = df_class[['科目', '班级', '人数', '学生配套']].copy()
+                        df_packages_overview.columns = ['科目', '班级', '人数', '涉及配套'] # 重命名一下列名以匹配需求
+                        df_packages_overview.to_excel(writer, sheet_name='所有班级及涉及的配套', index=False)
+                        
+                        # === 自动调整列宽逻辑 ===
                         workbook = writer.book
                         
-                        # 调整开班详情的列宽
-                        worksheet1 = writer.sheets['开班详情']
-                        for idx, col in enumerate(df_class.columns):
-                            # 计算列宽：取列名长度和该列最大值长度的较大者
-                            max_length = max(
-                                len(str(col)),  # 列名长度
-                                df_class[col].astype(str).str.len().max()  # 列内容最大长度
-                            )
-                            # 设置列宽（加上一些余量）
-                            adjusted_width = min(max_length + 2, 50)  # 最大50字符
-                            # 使用get_column_letter处理任意列数，避免超过26列时出错
-                            worksheet1.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
-                        
-                        # 调整时段总表的列宽
-                        worksheet2 = writer.sheets['时段总表']
-                        for idx, col in enumerate(df_slot.columns):
-                            max_length = max(
-                                len(str(col)),
-                                df_slot[col].astype(str).str.len().max()
-                            )
-                            adjusted_width = min(max_length + 2, 50)
-                            # 使用get_column_letter处理任意列数，避免超过26列时出错
-                            worksheet2.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
+                        # 遍历所有 Sheet 调整列宽
+                        for sheet_name in writer.sheets:
+                            worksheet = writer.sheets[sheet_name]
+                            # 获取对应的 DataFrame
+                            if sheet_name == '时段总表':
+                                df_to_measure = df_slot
+                            elif sheet_name == '所有班级及涉及的配套':
+                                df_to_measure = df_packages_overview
+                            else:
+                                df_to_measure = df_class
+                                
+                            for idx, col in enumerate(df_to_measure.columns):
+                                # 计算最大长度
+                                max_len = max(
+                                    len(str(col)),
+                                    df_to_measure[col].astype(str).str.len().max() if not df_to_measure[col].empty else 0
+                                )
+                                # 设置宽度 (限制最大 60)
+                                adjusted_width = min(max_len + 4, 60)
+                                worksheet.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
                     
                     st.download_button(
                         label="📥 下载Excel文件",
@@ -1250,6 +1234,5 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         file_name=f"{sol['name'].replace('：', '_')}_排课结果.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
-
 if __name__ == "__main__":
     main()
