@@ -523,18 +523,17 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据（人数去重版）
-        1. 班级命名：按人数降序命名为 A, B, C...
-        2. 时段总表：拼图合并 + 人数去重计算。
-           如果同一行是 P1(5人) + P1(5人)，人数显示 5。
-           如果同一行是 P1(5人) + P2(8人)，人数显示 13。
+        提取课表数据（视觉优化适配版）
+        1. 班级命名：A, B, C...
+        2. 数据结构：除了生成给Excel用的字符串，额外生成 'display_items' 列表，
+           用于在前端绘制 "卡片 -> 箭头 -> 卡片" 的流程效果。
         """
         solver = result['solver']
         u_r = result['variables']['u_r']
         y_rt = result['variables']['y_rt']
         u_pkr = result['variables']['u_pkr']
         
-        # ========== 第一步：构建班级命名映射 (保持不变) ==========
+        # ========== 1. 班级命名映射 ==========
         class_name_map = {} 
         for k in self.subjects:
             active_classes = []
@@ -543,123 +542,103 @@ class ScheduleSolver:
                     students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
                     size = sum(self.packages[p]['人数'] for p in students)
                     active_classes.append({'r': r, 'size': size})
-            
-            # 排序：人数从多到少
             active_classes.sort(key=lambda x: (-x['size'], x['r']))
-            
             for index, item in enumerate(active_classes):
-                new_name = f"班{chr(65 + index)}"
-                class_name_map[(k, item['r'])] = new_name
+                class_name_map[(k, item['r'])] = f"班{chr(65 + index)}"
 
-        # ========== 第二步：生成开班详情 (保持不变) ==========
+        # ========== 2. 开班详情 (保持不变) ==========
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
                 if solver.Value(u_r[(k, r)]) == 1:
                     students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
                     size = sum(self.packages[p]['人数'] for p in students)
-                    
                     time_slots = [t for t in self.TIME_SLOTS_1H if solver.Value(y_rt[(k, r, t)]) == 1]
                     slot_groups_used = defaultdict(list)
                     for t in time_slots:
-                        group = self.SLOT_TO_GROUP[t]
-                        slot_groups_used[group].append(t)
-                    
-                    slot_str = ', '.join([f"{g}({len(slots)}h)" 
-                                         for g, slots in sorted(slot_groups_used.items(), key=lambda x: natural_sort_key(x[0]))])
-                    students_sorted = sorted(students, key=natural_sort_key)
-                    display_name = class_name_map.get((k, r), f'班{r}')
-
+                        slot_groups_used[self.SLOT_TO_GROUP[t]].append(t)
+                    slot_str = ', '.join([f"{g}({len(slots)}h)" for g, slots in sorted(slot_groups_used.items(), key=lambda x: natural_sort_key(x[0]))])
                     class_details.append({
                         '科目': k,
-                        '班级': display_name,
+                        '班级': class_name_map.get((k, r), f'班{r}'),
                         '人数': size,
                         '时段': slot_str,
-                        '学生配套': ', '.join(students_sorted)
+                        '学生配套': ', '.join(sorted(students, key=natural_sort_key))
                     })
-        
-        # 强制排序
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 第三步：生成时段总表 (拼图 + 人数去重) ==========
+        # ========== 3. 时段总表 (包含 display_items) ==========
         slot_schedule_data = []
-        
-        # 遍历每个时段组
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
             group_slots = self.SLOT_GROUPS[group_name]
-            
-            # 1. 收集课程碎片
             fragments = []
-            
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
                     active_slots = [t for t in group_slots if solver.Value(y_rt[(k, r, t)]) == 1]
                     actual_hours = len(active_slots)
-                    
                     if actual_hours == 0: continue
-                    
                     students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
                     if not students: continue
                     
-                    size = sum(self.packages[p]['人数'] for p in students)
-                    students_sorted = sorted(students, key=natural_sort_key)
-                    display_name = class_name_map.get((k, r), f'班{r}')
-                    
                     fragments.append({
-                        'subject': f"{k}({actual_hours}h)",
-                        'class_name': f"{k}{display_name}",
-                        'packages_str': ', '.join(students_sorted),
-                        'raw_packages': students, # [关键] 保存原始配套列表用于去重计算
-                        'size': size,
+                        'subject': f"{k}", # 纯科目名
+                        'duration_str': f"{actual_hours}h",
+                        'class_name': class_name_map.get((k, r), f'班{r}'),
+                        'packages_str': ', '.join(sorted(students, key=natural_sort_key)),
+                        'raw_packages': students,
+                        'size': sum(self.packages[p]['人数'] for p in students),
                         'raw_hours': actual_hours,
                         'active_slots': set(active_slots),
                         'start_time': min(active_slots)
                     })
             
-            # 2. 贪心拼图
             fragments.sort(key=lambda x: -x['size'])
             visual_rows = []
-            
             for frag in fragments:
                 placed = False
                 for row in visual_rows:
                     conflict = False
-                    for existing_item in row:
-                        if not frag['active_slots'].isdisjoint(existing_item['active_slots']):
-                            conflict = True
-                            break
+                    for existing in row:
+                        if not frag['active_slots'].isdisjoint(existing['active_slots']):
+                            conflict = True; break
                     if not conflict:
-                        row.append(frag)
-                        placed = True
-                        break
-                if not placed:
-                    visual_rows.append([frag])
+                        row.append(frag); placed = True; break
+                if not placed: visual_rows.append([frag])
             
-            # 3. 格式化输出 (核心修改：人数计算)
             for row_items in visual_rows:
+                # 按时间先后排序
                 row_items.sort(key=lambda x: x['start_time'])
                 
-                merged_subject = " + ".join([i['subject'] for i in row_items])
-                merged_class = " + ".join([i['class_name'] for i in row_items])
+                # Excel 用的纯文本字符串
+                merged_subject = " + ".join([f"{i['subject']}({i['duration_str']})" for i in row_items])
+                merged_class = " + ".join([f"{i['subject']}{i['class_name']}" for i in row_items])
                 merged_packages = " + ".join([i['packages_str'] for i in row_items])
-                total_hours_sum = sum(i['raw_hours'] for i in row_items)
                 
-                # --- [核心修改] 计算去重后的总人数 ---
-                unique_packages_in_row = set()
-                for item in row_items:
-                    for p_name in item['raw_packages']:
-                        unique_packages_in_row.add(p_name)
+                # 计算去重人数
+                unique_pkgs = set()
+                for i in row_items:
+                    for p in i['raw_packages']: unique_pkgs.add(p)
+                unique_count = sum(self.packages[p]['人数'] for p in unique_pkgs)
                 
-                # 根据去重后的配套列表，计算总人数
-                unique_student_count = sum(self.packages[p]['人数'] for p in unique_packages_in_row)
-                
+                # [关键] 构造 UI 用的数据对象
+                display_list = []
+                for idx, item in enumerate(row_items):
+                    display_list.append({
+                        'seq': idx + 1, # 序号 1, 2, 3
+                        'subject': item['subject'],
+                        'duration': item['duration_str'],
+                        'class': item['class_name'],
+                        'color_seed': item['subject'] # 用于生成随机颜色
+                    })
+
                 slot_schedule_data.append({
                     '时段': group_name,
-                    '时长': f"{total_hours_sum}h",
-                    '科目': merged_subject,
-                    '班级': merged_class,
-                    '人数': unique_student_count, # 直接显示去重后的数字
-                    '涉及配套': merged_packages
+                    '时长': f"{sum(i['raw_hours'] for i in row_items)}h",
+                    '科目': merged_subject,   # Excel用
+                    '班级': merged_class,     # Excel用
+                    '人数': unique_count,
+                    '涉及配套': merged_packages,
+                    'display_items': display_list # [新] 前端渲染用
                 })
         
         return class_details, slot_schedule_data
@@ -1026,12 +1005,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 with tab2:
                     st.markdown("### 🕐 时段总表")
                     
-                    # ========== 1. 准备数据 ==========
                     schedule_data = sol['slot_schedule']
                     if not schedule_data:
                         st.info("暂无数据")
                     else:
-                        # ========== 2. 生成 HTML 表格 (深色模式 Dark Mode 优化版) ==========
+                        # ========== HTML 表格 (流程卡片优化版) ==========
                         
                         table_css = """
                         <style>
@@ -1040,125 +1018,136 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 border-collapse: collapse;
                                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                                 margin-bottom: 1rem;
-                                font-size: 16px;
-                                color: #ffffff; /* 全局默认文字白色 */
+                                font-size: 15px;
+                                color: #ffffff; 
                             }
                             .schedule-table th {
-                                background-color: #262730; /* 表头深灰色背景 */
-                                color: #ffffff; /* 表头文字纯白 */
+                                background-color: #262730;
+                                color: #ffffff;
                                 font-weight: 700;
-                                padding: 14px 12px;
+                                padding: 12px;
                                 text-align: left;
-                                border-bottom: 2px solid #4a4a4a; /* 表头下边框 */
+                                border-bottom: 2px solid #4a4a4a;
                                 border-top: 1px solid #4a4a4a;
                                 white-space: nowrap;
                             }
                             .schedule-table td {
-                                padding: 12px 12px;
+                                padding: 8px 12px; /* 减小内边距 */
                                 text-align: left;
-                                border-right: 1px solid #333333; /* 单元格右侧分割线(深色) */
-                                color: #e0e0e0; /* 单元格文字浅灰 */
+                                border-right: 1px solid #333333;
+                                color: #e0e0e0;
                                 vertical-align: middle;
-                                line-height: 1.5;
                             }
+                            .group-border-bottom { border-bottom: 3px solid #666666 !important; }
+                            .normal-border-bottom { border-bottom: 1px solid #333333; }
                             
-                            /* 粗边框分隔不同时段组 (在黑背景下用亮灰色线) */
-                            .group-border-bottom {
-                                border-bottom: 3px solid #666666 !important; 
-                            }
-                            .normal-border-bottom {
-                                border-bottom: 1px solid #333333; /* 普通行分割线(深色) */
-                            }
-                            
-                            /* === 第一列：时段 === */
                             .slot-column {
-                                font-weight: 800; 
-                                font-size: 1.2rem;
+                                font-weight: 800; font-size: 1.2rem;
                                 text-align: center !important;
-                                background-color: #1a1c24; /* 比背景稍亮或稍暗的块 */
-                                color: #4fc3f7; /* 亮蓝色高亮时段名 */
-                                width: 85px;
-                                border-right: 2px solid #4a4a4a !important;
+                                background-color: #1a1c24; color: #4fc3f7;
+                                width: 80px; border-right: 2px solid #4a4a4a !important;
                             }
-                            
-                            /* === 第二列：时长 === */
                             .duration-column {
-                                text-align: center !important;
-                                width: 65px;
-                                font-weight: 600;
-                                color: #90caf9; /* 浅蓝色 */
+                                text-align: center !important; width: 60px;
+                                font-weight: 600; color: #90caf9;
                             }
                             
-                            /* === 第三列：科目 & 班级 === */
-                            .subject-class-cell {
-                                min-width: 220px;
+                            /* === 核心优化：流程卡片样式 === */
+                            .timeline-container {
+                                display: flex;
+                                align-items: center;
+                                flex-wrap: wrap; /* 如果屏幕太窄允许换行 */
+                                gap: 6px;
                             }
-                            .subject-text {
-                                font-weight: 800; 
-                                font-size: 1.1rem;
-                                color: #ffffff; /* 科目纯白高亮 */
-                                display: block;
-                                margin-bottom: 4px;
-                                text-shadow: 0px 0px 2px rgba(0,0,0,0.5); /* 增加一点文字阴影增加对比 */
+                            .timeline-card {
+                                background-color: #333333;
+                                border: 1px solid #444;
+                                border-radius: 6px;
+                                padding: 4px 8px;
+                                display: flex;
+                                flex-direction: column;
+                                min-width: 110px;
                             }
-                            .class-text {
-                                color: #bdbdbd; /* 班级浅灰色 */
-                                font-size: 0.95rem;
-                                font-weight: 500;
-                                background-color: #333333; /* 深色背景块 */
-                                padding: 2px 6px;
-                                border-radius: 4px;
-                                display: inline-block;
+                            .card-header {
+                                display: flex;
+                                align-items: center;
+                                margin-bottom: 2px;
                             }
-                            
-                            /* === 第四、五列：人数和配套 === */
-                            .count-cell {
+                            .seq-badge {
+                                background-color: #0288d1; /* 序号底色 */
+                                color: white;
+                                font-size: 0.75rem;
                                 font-weight: bold;
-                                font-size: 1.1rem;
-                                text-align: center;
-                                color: #ffffff;
+                                width: 16px; height: 16px;
+                                border-radius: 50%;
+                                display: flex; align-items: center; justify-content: center;
+                                margin-right: 6px;
                             }
-                            .package-cell {
-                                color: #b0bec5; /* 蓝灰色 */
-                                font-size: 0.95rem;
+                            .subject-name {
+                                font-weight: 800; color: #fff; font-size: 0.95rem;
                             }
+                            .card-footer {
+                                display: flex; justify-content: space-between;
+                                font-size: 0.8rem; color: #aaa;
+                            }
+                            .duration-tag {
+                                background-color: #424242; padding: 0 4px; border-radius: 3px;
+                            }
+                            .arrow-icon {
+                                color: #666; font-size: 1.2rem; font-weight: bold;
+                                margin: 0 2px;
+                            }
+                            
+                            .count-cell { font-weight: bold; font-size: 1.1rem; text-align: center; color: #fff; }
+                            .package-cell { color: #b0bec5; font-size: 0.9rem; }
                         </style>
                         """
                         
-                        # 构建 HTML 内容
                         html_rows = []
-                        
                         from itertools import groupby
                         schedule_data.sort(key=lambda x: natural_sort_key(x['时段']))
                         
                         for slot_name, items in groupby(schedule_data, key=lambda x: x['时段']):
                             group_items = list(items)
                             row_count = len(group_items)
-                            
                             for i, item in enumerate(group_items):
-                                is_last_in_group = (i == row_count - 1)
-                                border_class = "group-border-bottom" if is_last_in_group else "normal-border-bottom"
-                                
+                                border_class = "group-border-bottom" if i == row_count - 1 else "normal-border-bottom"
                                 row_html = f"<tr class='{border_class}'>"
                                 
-                                # === 第一列 & 第二列 (合并) ===
                                 if i == 0:
                                     row_html += f"<td class='slot-column' rowspan='{row_count}'>{item['时段']}</td>"
                                     row_html += f"<td class='duration-column' rowspan='{row_count}'>{item['时长']}</td>"
                                 
-                                # === 第三列：科目 & 班级 ===
-                                row_html += f"""
-                                <td class='subject-class-cell'>
-                                    <span class="subject-text">{item['科目']}</span>
-                                    <span class="class-text">{item['班级']}</span>
-                                </td>
-                                """
+                                # === [核心] 构建流程图 ===
+                                flow_html = '<div class="timeline-container">'
+                                display_items = item.get('display_items', [])
                                 
-                                # === 其他列 ===
+                                for idx, d_item in enumerate(display_items):
+                                    # 卡片 HTML
+                                    card = f"""
+                                    <div class="timeline-card">
+                                        <div class="card-header">
+                                            <span class="seq-badge">{d_item['seq']}</span>
+                                            <span class="subject-name">{d_item['subject']}</span>
+                                        </div>
+                                        <div class="card-footer">
+                                            <span>{d_item['class']}</span>
+                                            <span class="duration-tag">{d_item['duration']}</span>
+                                        </div>
+                                    </div>
+                                    """
+                                    flow_html += card
+                                    
+                                    # 如果不是最后一个，添加箭头
+                                    if idx < len(display_items) - 1:
+                                        flow_html += '<div class="arrow-icon">➜</div>'
+                                
+                                flow_html += '</div>'
+                                row_html += f"<td>{flow_html}</td>"
+                                
                                 row_html += f"<td class='count-cell'>{item['人数']}</td>"
                                 row_html += f"<td class='package-cell'>{item['涉及配套']}</td>"
                                 row_html += "</tr>"
-                                
                                 html_rows.append(row_html)
                         
                         full_html = f"""
@@ -1168,33 +1157,31 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 <tr>
                                     <th>时段</th>
                                     <th>时长</th>
-                                    <th>科目 & 班级</th>
-                                    <th style="text-align: center;">人数</th>
+                                    <th>课程流程 (顺序)</th> <th style="text-align: center;">人数</th>
                                     <th>涉及配套</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                {''.join(html_rows)}
-                            </tbody>
+                            <tbody>{''.join(html_rows)}</tbody>
                         </table>
                         """
-                        
                         st.markdown(full_html, unsafe_allow_html=True)
 
                     # ========== 3. 统计信息 (保持不变) ==========
                     st.markdown("### 📊 统计信息")
                     df_slot = pd.DataFrame(schedule_data)
-                    
+                    # 导出Excel时，要把 display_items 这个辅助字段去掉，防止报错
+                    if 'display_items' in df_slot.columns:
+                        df_slot = df_slot.drop(columns=['display_items'])
+                        
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        unique_slots = df_slot['时段'].nunique() if not df_slot.empty else 0
-                        st.metric("总时段数", unique_slots)
+                        st.metric("总时段数", df_slot['时段'].nunique() if not df_slot.empty else 0)
                     with col2:
-                        total_classes = len(df_slot)
-                        st.metric("总条目数", total_classes)
+                        st.metric("总条目数", len(df_slot))
                     with col3:
-                        avg_classes_per_slot = total_classes / unique_slots if unique_slots > 0 else 0
-                        st.metric("平均每时段条目", f"{avg_classes_per_slot:.1f}")
+                        unique = df_slot['时段'].nunique() if not df_slot.empty else 0
+                        avg = len(df_slot) / unique if unique > 0 else 0
+                        st.metric("平均每时段条目", f"{avg:.1f}")
                                 
                 with tab3:
                     # 导出为Excel
