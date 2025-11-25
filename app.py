@@ -593,10 +593,70 @@ def main():
         st.header("⚙️ 系统配置")
         
         st.subheader("📁 数据导入")
+        
+        # 下载模板功能
+        st.markdown("##### 📥 下载数据模板")
+        st.markdown("""
+        <div style="padding: 0.5rem; background-color: #e3f2fd; border-radius: 0.3rem; margin-bottom: 0.5rem; font-size: 0.85rem;">
+        💡 首次使用？下载示例模板了解数据格式
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 创建示例CSV数据
+        template_data = """配套,科目,人数,总学点
+P12,"会计学（4）,经济（4）,商业（3）,历史（4）,AI应用（2）,AI编程（2）",5,19
+P13,"物理（6）,经济（4）,历史（4）,地理（4）,AI应用（2）",6,20
+P14,"物理（6）,会计学（4）,经济（4）,商业（3）,AI应用（2）,AI编程（2）",4,21
+P15,"生物（4）,化学（5）,物理（6）,会计学（4）,AI应用（2）",9,21
+P16,"生物（4）,化学（5）,物理（6）,商业（3）,AI应用（2）",3,20
+P17,"生物（4）,化学（5）,会计学（4）,地理（4）,AI应用（2）,AI编程（2）",8,21
+P18,"生物（4）,化学（5）,经济（4）,历史（4）,AI应用（2）,AI编程（2）",11,21
+P19,"物理（6）,经济（4）,商业（3）,历史（4）,AI应用（2）,AI编程（2）",7,21
+P20,"物理（6）,生物（4）,化学（5）,经济（4）,AI应用（2）",10,21
+P21,"物理（6）,生物（4）,化学（5）,地理（4）,AI应用（2）",2,21
+P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI编程（2）",12,21"""
+        
+        # 下载按钮
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.download_button(
+                label="📄 CSV模板",
+                data=template_data.encode('utf-8-sig'),  # 使用BOM确保Excel正确识别UTF-8
+                file_name="排课数据模板.csv",
+                mime="text/csv",
+                help="下载CSV格式的示例模板",
+                use_container_width=True
+            )
+        with col2:
+            # 创建Excel格式的模板
+            template_df = pd.DataFrame([
+                {'配套': 'P12', '科目': '会计学（4）,经济（4）,商业（3）,历史（4）,AI应用（2）,AI编程（2）', '人数': 5, '总学点': 19},
+                {'配套': 'P13', '科目': '物理（6）,经济（4）,历史（4）,地理（4）,AI应用（2）', '人数': 6, '总学点': 20},
+                {'配套': 'P14', '科目': '物理（6）,会计学（4）,经济（4）,商业（3）,AI应用（2）,AI编程（2）', '人数': 4, '总学点': 21},
+                {'配套': 'P15', '科目': '生物（4）,化学（5）,物理（6）,会计学（4）,AI应用（2）', '人数': 9, '总学点': 21},
+            ])
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                template_df.to_excel(writer, index=False, sheet_name='配套数据')
+            
+            st.download_button(
+                label="📊 Excel模板",
+                data=excel_buffer.getvalue(),
+                file_name="排课数据模板.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="下载Excel格式的示例模板",
+                use_container_width=True
+            )
+        
+        st.markdown("---")
+        
+        # 文件上传
+        st.markdown("##### 📤 上传数据文件")
         uploaded_file = st.file_uploader(
-            "上传配套数据文件",
+            "选择文件",
             type=['xlsx', 'xls', 'csv'],
-            help="支持Excel和CSV格式，需包含'配套'、'科目'、'人数'列"
+            help="支持Excel和CSV格式，需包含'配套'、'科目'、'人数'列",
+            label_visibility="collapsed"
         )
         
         if uploaded_file:
