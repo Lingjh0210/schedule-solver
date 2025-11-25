@@ -1041,72 +1041,96 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     if not schedule_data:
                         st.info("暂无数据")
                     else:
-                        # ========== 2. 生成 HTML 表格 (优化版：合并科目与班级) ==========
+                        # ========== 2. 生成 HTML 表格 (深色模式 Dark Mode 优化版) ==========
                         
-                        # 定义样式：
-                        # 1. 第一列(时段)加粗并居中
-                        # 2. 组之间加粗黑线 (outline)
-                        # 3. 科目班级列内容支持换行
                         table_css = """
                         <style>
                             .schedule-table {
                                 width: 100%;
                                 border-collapse: collapse;
-                                font-family: "Source Sans Pro", sans-serif;
+                                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                                 margin-bottom: 1rem;
-                                font-size: 0.95rem;
+                                font-size: 16px;
+                                color: #ffffff; /* 全局默认文字白色 */
                             }
                             .schedule-table th {
-                                background-color: #f0f2f6;
-                                color: #31333F;
-                                font-weight: 600;
-                                padding: 12px 10px;
+                                background-color: #262730; /* 表头深灰色背景 */
+                                color: #ffffff; /* 表头文字纯白 */
+                                font-weight: 700;
+                                padding: 14px 12px;
                                 text-align: left;
-                                border-bottom: 2px solid #e6e9ef;
-                                border-top: 1px solid #e6e9ef;
+                                border-bottom: 2px solid #4a4a4a; /* 表头下边框 */
+                                border-top: 1px solid #4a4a4a;
+                                white-space: nowrap;
                             }
                             .schedule-table td {
-                                padding: 10px 10px;
+                                padding: 12px 12px;
                                 text-align: left;
-                                border-right: 1px solid #f0f0f0;
-                                color: #31333F;
+                                border-right: 1px solid #333333; /* 单元格右侧分割线(深色) */
+                                color: #e0e0e0; /* 单元格文字浅灰 */
                                 vertical-align: middle;
-                                line-height: 1.4;
+                                line-height: 1.5;
                             }
-                            /* 粗边框分隔不同时段组 (Outline效果) */
+                            
+                            /* 粗边框分隔不同时段组 (在黑背景下用亮灰色线) */
                             .group-border-bottom {
-                                border-bottom: 3px solid #555 !important;
+                                border-bottom: 3px solid #666666 !important; 
                             }
-                            /* 普通行边框 */
                             .normal-border-bottom {
-                                border-bottom: 1px solid #e6e9ef;
+                                border-bottom: 1px solid #333333; /* 普通行分割线(深色) */
                             }
-                            /* 第一列样式：时段 */
+                            
+                            /* === 第一列：时段 === */
                             .slot-column {
-                                font-weight: bold;
+                                font-weight: 800; 
+                                font-size: 1.2rem;
                                 text-align: center !important;
-                                background-color: #fafafa;
-                                width: 80px;
-                                border-right: 2px solid #e6e9ef !important; /* 第一列右侧加重分割 */
+                                background-color: #1a1c24; /* 比背景稍亮或稍暗的块 */
+                                color: #4fc3f7; /* 亮蓝色高亮时段名 */
+                                width: 85px;
+                                border-right: 2px solid #4a4a4a !important;
                             }
-                            /* 第二列样式：时长 */
+                            
+                            /* === 第二列：时长 === */
                             .duration-column {
                                 text-align: center !important;
-                                width: 60px;
-                                color: #666;
+                                width: 65px;
+                                font-weight: 600;
+                                color: #90caf9; /* 浅蓝色 */
                             }
-                            /* 合并后的科目班级列 */
+                            
+                            /* === 第三列：科目 & 班级 === */
                             .subject-class-cell {
-                                min-width: 200px;
+                                min-width: 220px;
                             }
                             .subject-text {
-                                font-weight: 600;
+                                font-weight: 800; 
+                                font-size: 1.1rem;
+                                color: #ffffff; /* 科目纯白高亮 */
                                 display: block;
-                                margin-bottom: 2px;
+                                margin-bottom: 4px;
+                                text-shadow: 0px 0px 2px rgba(0,0,0,0.5); /* 增加一点文字阴影增加对比 */
                             }
                             .class-text {
-                                color: #666;
-                                font-size: 0.9em;
+                                color: #bdbdbd; /* 班级浅灰色 */
+                                font-size: 0.95rem;
+                                font-weight: 500;
+                                background-color: #333333; /* 深色背景块 */
+                                padding: 2px 6px;
+                                border-radius: 4px;
+                                display: inline-block;
+                            }
+                            
+                            /* === 第四、五列：人数和配套 === */
+                            .count-cell {
+                                font-weight: bold;
+                                font-size: 1.1rem;
+                                text-align: center;
+                                color: #ffffff;
+                            }
+                            .package-cell {
+                                color: #b0bec5; /* 蓝灰色 */
+                                font-size: 0.95rem;
                             }
                         </style>
                         """
@@ -1114,9 +1138,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         # 构建 HTML 内容
                         html_rows = []
                         
-                        # 按"时段"分组数据 (例如 S1, S2...)
                         from itertools import groupby
-                        # 确保数据已按时段排序
                         schedule_data.sort(key=lambda x: natural_sort_key(x['时段']))
                         
                         for slot_name, items in groupby(schedule_data, key=lambda x: x['时段']):
@@ -1124,20 +1146,17 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             row_count = len(group_items)
                             
                             for i, item in enumerate(group_items):
-                                # 最后一行的下边框加粗，形成 Outline 效果
                                 is_last_in_group = (i == row_count - 1)
                                 border_class = "group-border-bottom" if is_last_in_group else "normal-border-bottom"
                                 
                                 row_html = f"<tr class='{border_class}'>"
                                 
-                                # === 第一列：时段 (合并单元格) ===
+                                # === 第一列 & 第二列 (合并) ===
                                 if i == 0:
                                     row_html += f"<td class='slot-column' rowspan='{row_count}'>{item['时段']}</td>"
-                                    # 时长列通常也是统一的，可以合并显示
                                     row_html += f"<td class='duration-column' rowspan='{row_count}'>{item['时长']}</td>"
                                 
-                                # === 第三列：科目 & 班级 (核心修改：合并显示) ===
-                                # 将 "化学(1h)" 和 "化学班A" 组合在一个单元格里
+                                # === 第三列：科目 & 班级 ===
                                 row_html += f"""
                                 <td class='subject-class-cell'>
                                     <span class="subject-text">{item['科目']}</span>
@@ -1146,13 +1165,12 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 """
                                 
                                 # === 其他列 ===
-                                row_html += f"<td>{item['人数']}</td>"
-                                row_html += f"<td>{item['涉及配套']}</td>"
+                                row_html += f"<td class='count-cell'>{item['人数']}</td>"
+                                row_html += f"<td class='package-cell'>{item['涉及配套']}</td>"
                                 row_html += "</tr>"
                                 
                                 html_rows.append(row_html)
                         
-                        # 组合最终 HTML
                         full_html = f"""
                         {table_css}
                         <table class="schedule-table">
@@ -1160,7 +1178,8 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 <tr>
                                     <th>时段</th>
                                     <th>时长</th>
-                                    <th>科目 & 班级</th> <th>人数</th>
+                                    <th>科目 & 班级</th>
+                                    <th style="text-align: center;">人数</th>
                                     <th>涉及配套</th>
                                 </tr>
                             </thead>
@@ -1170,7 +1189,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         </table>
                         """
                         
-                        # 渲染 HTML
                         st.markdown(full_html, unsafe_allow_html=True)
 
                     # ========== 3. 统计信息 (保持不变) ==========
