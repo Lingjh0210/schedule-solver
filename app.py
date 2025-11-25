@@ -395,63 +395,50 @@ class ScheduleSolver:
             model.Minimize(total_classes * 100000 + slot_split_penalty + priority_penalty)
             
         elif objective_type == 'balanced':
-            # 方案B：为了公平可以牺牲一点资源。
-            # 这里的逻辑调整：
-            # 1. total_classes 权重降为 5000 (原本是100万)
-            # 2. (max-min) 权重设为 100 (每差1人罚100分)
-            # 
-            # 算笔账：
-            # 如果现有方案是 2个班 (50人, 10人)，差值40。
-            # 分数 = 2*5000 + 40*100 = 10,000 + 4,000 = 14,000
-            # 
-            # 如果多开1个班变成 3个班 (20人, 20人, 20人)，差值0。
-            # 分数 = 3*5000 + 0*100 = 15,000
-            # 
-            # 此时求解器依然会选择少开班(14000 < 15000)。
-            # 但如果我们把 total_classes 降得更低，或者把 max-min 提得更高，求解器就会倒戈。
-            
-            # 建议配置：允许为了显著的均衡提升而多开班
-            # 开班成本 2000， 均衡收益(每1人差值) 50
-            # 这样如果多开一个班(成本2000)能减少 >40人的差值(40*50=2000)，它就会去多开班。
-            
-            # max_size 和 min_size 已经在上面定义好了，这里直接用
-            
-            # --- 核心修改：调整权重 ---
-            # 降低开班权重的绝对统治力，提升均衡权重
-            weight_class = 5000  # 开一个班的“成本”
-            weight_balance = 200 # 不均衡的“罚款”（每差1人罚100）
-            weight_split = self.config.get('slot_split_penalty', 1000) # 时段分割罚款
-            
-            model.Minimize(
-                total_classes * weight_class + 
-                (max_size - min_size) * weight_balance + 
-                slot_split_penalty * (weight_split / 100) + # 保持适度的分割惩罚
-                priority_penalty
-            )
+            # ========== 1. 定义 max_size 和 min_size (补回缺失的逻辑) ==========
+            # 为每个班级创建"有效大小"变量
+            # 用于计算 max_size 和 min_size，忽略未开启的班级
+            effective_sizes_for_max = []
+            effective_sizes_for_min = []
             
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
+                    # 计算该班级的实际人数
                     actual_size = sum(self.packages[p]['人数'] * u_pkr[(p, k, r)] for p in self.package_names)
                     
-                    # 有效大小（用于max）：如果开班则=实际大小，否则=0（不影响max）
+                    # 有效大小（用于max）：如果开班则=实际大小，否则=0（不影响max计算）
                     eff_size_max = model.NewIntVar(0, 200, f'eff_max_{k}_{r}')
                     model.Add(eff_size_max == actual_size).OnlyEnforceIf(u_r[(k, r)])
                     model.Add(eff_size_max == 0).OnlyEnforceIf(u_r[(k, r)].Not())
                     effective_sizes_for_max.append(eff_size_max)
                     
-                    # 有效大小（用于min）：如果开班则=实际大小，否则=200（不影响min）
+                    # 有效大小（用于min）：如果开班则=实际大小，否则=200（不影响min计算）
+                    # 注意：设为200是因为班额上限通常小于200，这样未开班的200不会成为最小值
                     eff_size_min = model.NewIntVar(0, 200, f'eff_min_{k}_{r}')
                     model.Add(eff_size_min == actual_size).OnlyEnforceIf(u_r[(k, r)])
                     model.Add(eff_size_min == 200).OnlyEnforceIf(u_r[(k, r)].Not())
                     effective_sizes_for_min.append(eff_size_min)
             
-            # max_size = 所有开班班级中的最大值
-            # min_size = 所有开班班级中的最小值
+            # 定义决策变量：所有开班班级中的最大值和最小值
             max_size = model.NewIntVar(0, 200, 'max_size')
             min_size = model.NewIntVar(0, 200, 'min_size')
+            
+            # 绑定约束
             model.AddMaxEquality(max_size, effective_sizes_for_max)
             model.AddMinEquality(min_size, effective_sizes_for_min)
-            model.Minimize(total_classes * 1000000 + slot_split_penalty * 100 + (max_size - min_size) * 1000 + priority_penalty)
+
+            # ========== 2. 定义目标函数 (调整权重) ==========
+            # 降低开班权重的绝对统治力，提升均衡权重
+            weight_class = 5000  # 开一个班的“成本” (降低，原为100万)
+            weight_balance = 200 # 不均衡的“罚款” (提升，每差1人罚200)
+            weight_split = self.config.get('slot_split_penalty', 1000) # 时段分割罚款
+            
+            model.Minimize(
+                total_classes * weight_class + 
+                (max_size - min_size) * weight_balance + 
+                slot_split_penalty * (weight_split / 100) + 
+                priority_penalty
+            )
         
         return model, {'u_r': u_r, 'y_rt': y_rt, 'u_pkr': u_pkr, 'x_prt': x_prt}
     
