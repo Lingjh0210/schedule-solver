@@ -1192,29 +1192,35 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         # [重要] 确保开班详情按 科目 -> 班级(A,B) 排序
                         df_class = df_class.sort_values(by=['科目', '班级'])
                         
-                        # 1. 写入 "开班详情" Sheet
+                        # 1. 写入 "开班详情" Sheet (保持原样，分开显示)
                         df_class.to_excel(writer, sheet_name='开班详情', index=False)
                         
                         # 2. 写入 "时段总表" Sheet
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
-                        # 3. [新增] 写入 "所有班级及涉及的配套" Sheet
-                        # 提取所需列，并确保排序正确 (df_class 已经排好序了)
-                        df_packages_overview = df_class[['科目', '班级', '人数', '学生配套']].copy()
-                        df_packages_overview.columns = ['科目', '班级', '人数', '涉及配套'] # 重命名一下列名以匹配需求
-                        df_packages_overview.to_excel(writer, sheet_name='所有班级及涉及的配套', index=False)
+                        # 3. [修改] 写入 "所有班级及涉及的配套" Sheet
+                        #  - 先复制一份数据
+                        df_overview = df_class.copy()
+                        #  - 合并列：例如 "化学" + "班A" -> "化学班A"
+                        df_overview['科目 & 班级'] = df_overview['科目'] + df_overview['班级']
+                        #  - 只保留合并后的列、人数和配套
+                        df_overview = df_overview[['科目 & 班级', '人数', '学生配套']]
+                        #  - 重命名配套列
+                        df_overview.columns = ['科目 & 班级', '人数', '涉及配套']
+                        
+                        df_overview.to_excel(writer, sheet_name='所有班级及涉及的配套', index=False)
                         
                         # === 自动调整列宽逻辑 ===
                         workbook = writer.book
                         
-                        # 遍历所有 Sheet 调整列宽
                         for sheet_name in writer.sheets:
                             worksheet = writer.sheets[sheet_name]
-                            # 获取对应的 DataFrame
+                            
+                            # 根据当前Sheet选择对应的DataFrame来计算列宽
                             if sheet_name == '时段总表':
                                 df_to_measure = df_slot
                             elif sheet_name == '所有班级及涉及的配套':
-                                df_to_measure = df_packages_overview
+                                df_to_measure = df_overview
                             else:
                                 df_to_measure = df_class
                                 
