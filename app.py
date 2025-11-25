@@ -1034,29 +1034,160 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         st.markdown('</div>', unsafe_allow_html=True)
                 
                 with tab2:
-                    st.markdown("### 🕐 时段总表（分行显示）")
-                    st.markdown("*每个班级单独一行，清晰显示涉及的配套*")
+                    st.markdown("### 🕐 时段总表")
                     
-                    df_slot = pd.DataFrame(sol['slot_schedule'])
-                    
-                    # 显示表格（使用全宽度）
-                    st.dataframe(df_slot, use_container_width=True, height=600)
-                    
-                    # 统计信息
-                    st.markdown("---")
+                    # ========== 1. 准备数据 ==========
+                    schedule_data = sol['slot_schedule']
+                    if not schedule_data:
+                        st.info("暂无数据")
+                    else:
+                        # ========== 2. 生成 HTML 表格 (优化版：合并科目与班级) ==========
+                        
+                        # 定义样式：
+                        # 1. 第一列(时段)加粗并居中
+                        # 2. 组之间加粗黑线 (outline)
+                        # 3. 科目班级列内容支持换行
+                        table_css = """
+                        <style>
+                            .schedule-table {
+                                width: 100%;
+                                border-collapse: collapse;
+                                font-family: "Source Sans Pro", sans-serif;
+                                margin-bottom: 1rem;
+                                font-size: 0.95rem;
+                            }
+                            .schedule-table th {
+                                background-color: #f0f2f6;
+                                color: #31333F;
+                                font-weight: 600;
+                                padding: 12px 10px;
+                                text-align: left;
+                                border-bottom: 2px solid #e6e9ef;
+                                border-top: 1px solid #e6e9ef;
+                            }
+                            .schedule-table td {
+                                padding: 10px 10px;
+                                text-align: left;
+                                border-right: 1px solid #f0f0f0;
+                                color: #31333F;
+                                vertical-align: middle;
+                                line-height: 1.4;
+                            }
+                            /* 粗边框分隔不同时段组 (Outline效果) */
+                            .group-border-bottom {
+                                border-bottom: 3px solid #555 !important;
+                            }
+                            /* 普通行边框 */
+                            .normal-border-bottom {
+                                border-bottom: 1px solid #e6e9ef;
+                            }
+                            /* 第一列样式：时段 */
+                            .slot-column {
+                                font-weight: bold;
+                                text-align: center !important;
+                                background-color: #fafafa;
+                                width: 80px;
+                                border-right: 2px solid #e6e9ef !important; /* 第一列右侧加重分割 */
+                            }
+                            /* 第二列样式：时长 */
+                            .duration-column {
+                                text-align: center !important;
+                                width: 60px;
+                                color: #666;
+                            }
+                            /* 合并后的科目班级列 */
+                            .subject-class-cell {
+                                min-width: 200px;
+                            }
+                            .subject-text {
+                                font-weight: 600;
+                                display: block;
+                                margin-bottom: 2px;
+                            }
+                            .class-text {
+                                color: #666;
+                                font-size: 0.9em;
+                            }
+                        </style>
+                        """
+                        
+                        # 构建 HTML 内容
+                        html_rows = []
+                        
+                        # 按"时段"分组数据 (例如 S1, S2...)
+                        from itertools import groupby
+                        # 确保数据已按时段排序
+                        schedule_data.sort(key=lambda x: natural_sort_key(x['时段']))
+                        
+                        for slot_name, items in groupby(schedule_data, key=lambda x: x['时段']):
+                            group_items = list(items)
+                            row_count = len(group_items)
+                            
+                            for i, item in enumerate(group_items):
+                                # 最后一行的下边框加粗，形成 Outline 效果
+                                is_last_in_group = (i == row_count - 1)
+                                border_class = "group-border-bottom" if is_last_in_group else "normal-border-bottom"
+                                
+                                row_html = f"<tr class='{border_class}'>"
+                                
+                                # === 第一列：时段 (合并单元格) ===
+                                if i == 0:
+                                    row_html += f"<td class='slot-column' rowspan='{row_count}'>{item['时段']}</td>"
+                                    # 时长列通常也是统一的，可以合并显示
+                                    row_html += f"<td class='duration-column' rowspan='{row_count}'>{item['时长']}</td>"
+                                
+                                # === 第三列：科目 & 班级 (核心修改：合并显示) ===
+                                # 将 "化学(1h)" 和 "化学班A" 组合在一个单元格里
+                                row_html += f"""
+                                <td class='subject-class-cell'>
+                                    <span class="subject-text">{item['科目']}</span>
+                                    <span class="class-text">{item['班级']}</span>
+                                </td>
+                                """
+                                
+                                # === 其他列 ===
+                                row_html += f"<td>{item['人数']}</td>"
+                                row_html += f"<td>{item['涉及配套']}</td>"
+                                row_html += "</tr>"
+                                
+                                html_rows.append(row_html)
+                        
+                        # 组合最终 HTML
+                        full_html = f"""
+                        {table_css}
+                        <table class="schedule-table">
+                            <thead>
+                                <tr>
+                                    <th>时段</th>
+                                    <th>时长</th>
+                                    <th>科目 & 班级</th> <th>人数</th>
+                                    <th>涉及配套</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {''.join(html_rows)}
+                            </tbody>
+                        </table>
+                        """
+                        
+                        # 渲染 HTML
+                        st.markdown(full_html, unsafe_allow_html=True)
+
+                    # ========== 3. 统计信息 (保持不变) ==========
                     st.markdown("### 📊 统计信息")
+                    df_slot = pd.DataFrame(schedule_data)
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        unique_slots = df_slot['时段'].nunique()
+                        unique_slots = df_slot['时段'].nunique() if not df_slot.empty else 0
                         st.metric("总时段数", unique_slots)
                     with col2:
                         total_classes = len(df_slot)
-                        st.metric("总班次数", total_classes)
+                        st.metric("总条目数", total_classes)
                     with col3:
                         avg_classes_per_slot = total_classes / unique_slots if unique_slots > 0 else 0
-                        st.metric("平均每时段班级数", f"{avg_classes_per_slot:.1f}")
-                
+                        st.metric("平均每时段条目", f"{avg_classes_per_slot:.1f}")
+                                
                 with tab3:
                     # 导出为Excel
                     output = io.BytesIO()
