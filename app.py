@@ -523,11 +523,11 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据（视觉拼图终极版）
+        提取课表数据（人数去重版）
         1. 班级命名：按人数降序命名为 A, B, C...
-        2. 时段总表：采用"贪心拼图"策略。
-           只要时间不冲突，哪怕学生完全不同，也会尽量把课程拼在同一行。
-           解决了 1h 课程散乱分布的问题，同时支持 3h 时段的 3个1h 拼接。
+        2. 时段总表：拼图合并 + 人数去重计算。
+           如果同一行是 P1(5人) + P1(5人)，人数显示 5。
+           如果同一行是 P1(5人) + P2(8人)，人数显示 13。
         """
         solver = result['solver']
         u_r = result['variables']['u_r']
@@ -581,19 +581,18 @@ class ScheduleSolver:
         # 强制排序
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 第三步：生成时段总表 (拼图逻辑) ==========
+        # ========== 第三步：生成时段总表 (拼图 + 人数去重) ==========
         slot_schedule_data = []
         
         # 遍历每个时段组
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
-            group_slots = self.SLOT_GROUPS[group_name] # e.g., [1, 2] or [19, 20, 21]
+            group_slots = self.SLOT_GROUPS[group_name]
             
-            # 1. 收集该时段组内所有的"课程碎片"
+            # 1. 收集课程碎片
             fragments = []
             
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
-                    # 获取该班级在这个时段组占用的具体时间点
                     active_slots = [t for t in group_slots if solver.Value(y_rt[(k, r, t)]) == 1]
                     actual_hours = len(active_slots)
                     
@@ -610,64 +609,56 @@ class ScheduleSolver:
                         'subject': f"{k}({actual_hours}h)",
                         'class_name': f"{k}{display_name}",
                         'packages_str': ', '.join(students_sorted),
+                        'raw_packages': students, # [关键] 保存原始配套列表用于去重计算
                         'size': size,
                         'raw_hours': actual_hours,
-                        'active_slots': set(active_slots), # 关键：用于检测碰撞
-                        'start_time': min(active_slots)    # 关键：用于排序
+                        'active_slots': set(active_slots),
+                        'start_time': min(active_slots)
                     })
             
-            # 2. 贪心拼图 (Tetris Packing)
-            # 先按人数降序排，尽量把大课先放进去，视觉上更整齐
+            # 2. 贪心拼图
             fragments.sort(key=lambda x: -x['size'])
-            
-            # visual_rows 存储最终的行，每一行是一个列表，包含若干个互不冲突的 fragments
             visual_rows = []
             
             for frag in fragments:
                 placed = False
-                # 尝试放入已有的行
                 for row in visual_rows:
-                    # 检查冲突：新碎片的时间点 是否与 该行已有的任何碎片 冲突
                     conflict = False
                     for existing_item in row:
                         if not frag['active_slots'].isdisjoint(existing_item['active_slots']):
                             conflict = True
                             break
-                    
                     if not conflict:
-                        # 不冲突！放入该行
                         row.append(frag)
                         placed = True
                         break
-                
                 if not placed:
-                    # 如果所有行都冲突，或者还没有行，就开新行
                     visual_rows.append([frag])
             
-            # 3. 格式化输出
+            # 3. 格式化输出 (核心修改：人数计算)
             for row_items in visual_rows:
-                # 每一行内部按时间先后排序 (例如 19点在前，20点在后)
                 row_items.sort(key=lambda x: x['start_time'])
                 
-                # 拼接字符串
                 merged_subject = " + ".join([i['subject'] for i in row_items])
                 merged_class = " + ".join([i['class_name'] for i in row_items])
                 merged_packages = " + ".join([i['packages_str'] for i in row_items])
-                
-                # 计算总时长 (仅仅是为了显示，通常是 2h 或 3h)
-                # 注意：如果中间空了一小时（比如上1h, 空1h, 上1h），总跨度是3h，实际课时2h
-                # 这里简单处理，直接显示实际课时总和
                 total_hours_sum = sum(i['raw_hours'] for i in row_items)
                 
-                # 人数显示
-                merged_size = "+".join([str(i['size']) for i in row_items])
+                # --- [核心修改] 计算去重后的总人数 ---
+                unique_packages_in_row = set()
+                for item in row_items:
+                    for p_name in item['raw_packages']:
+                        unique_packages_in_row.add(p_name)
+                
+                # 根据去重后的配套列表，计算总人数
+                unique_student_count = sum(self.packages[p]['人数'] for p in unique_packages_in_row)
                 
                 slot_schedule_data.append({
                     '时段': group_name,
                     '时长': f"{total_hours_sum}h",
                     '科目': merged_subject,
                     '班级': merged_class,
-                    '人数': merged_size,
+                    '人数': unique_student_count, # 直接显示去重后的数字
                     '涉及配套': merged_packages
                 })
         
