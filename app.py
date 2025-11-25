@@ -505,20 +505,21 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据
-        包含功能：
-        1. 班级自动命名为 A, B, C... (按人数大小排序)
-        2. 时段总表自动合并同一拨学生的分割课程 (如: 化学(1h)+商业(1h))
+        提取课表数据（已更新）
+        更新点1：班级命名改为 A, B, C...（按人数降序排列，人数最多的叫班A）
+        更新点2：时段总表中，同一群学生在同一大时段内的碎片课程（如1h+1h）合并显示
         """
         solver = result['solver']
         u_r = result['variables']['u_r']
         y_rt = result['variables']['y_rt']
         u_pkr = result['variables']['u_pkr']
         
-        # --- 步骤 1: 预计算班级大小并分配名称 (A, B, C...) ---
-        class_name_mapping = {} # {科目: {原ID_r: '班A'}}
+        # ========== 第一步：构建班级命名映射 (按人数降序 -> A, B, C...) ==========
+        # 键: (科目, 原始r索引), 值: "班A"
+        class_name_map = {} 
         
         for k in self.subjects:
+            # 1. 收集该科目所有实际开启的班级及其人数
             active_classes = []
             for r in range(1, self.config['max_classes_per_subject'] + 1):
                 if solver.Value(u_r[(k, r)]) == 1:
@@ -526,16 +527,16 @@ class ScheduleSolver:
                     size = sum(self.packages[p]['人数'] for p in students)
                     active_classes.append({'r': r, 'size': size})
             
-            # 按人数降序排列 (人数多的叫班A)
-            active_classes.sort(key=lambda x: x['size'], reverse=True)
+            # 2. 排序：人数从多到少 (如果人数相同，按原始r从小到大排，保持稳定)
+            active_classes.sort(key=lambda x: (-x['size'], x['r']))
             
-            mapping = {}
-            for idx, item in enumerate(active_classes):
-                new_name = f"班{chr(65 + idx)}" # 班A, 班B...
-                mapping[item['r']] = new_name
-            class_name_mapping[k] = mapping
+            # 3. 分配字母名称
+            for index, item in enumerate(active_classes):
+                # chr(65) = 'A', chr(66) = 'B'...
+                new_name = f"班{chr(65 + index)}"
+                class_name_map[(k, item['r'])] = new_name
 
-        # --- 步骤 2: 生成开班详情 (按科目列表) ---
+        # ========== 第二步：生成开班详情 (应用新命名) ==========
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -549,97 +550,101 @@ class ScheduleSolver:
                         group = self.SLOT_TO_GROUP[t]
                         slot_groups_used[group].append(t)
                     
-                    # 使用自然排序显示时段
+                    # 时段排序
                     slot_str = ', '.join([f"{g}({len(slots)}h)" 
                                          for g, slots in sorted(slot_groups_used.items(), key=lambda x: natural_sort_key(x[0]))])
                     
-                    # 配套也使用自然排序
+                    # 配套排序
                     students_sorted = sorted(students, key=natural_sort_key)
                     
-                    # 获取新名称（如：班A）
-                    class_name = class_name_mapping[k].get(r, f"班{r}")
-                    
+                    # 获取新名称（如果找不到映射，回退到原始名称）
+                    display_name = class_name_map.get((k, r), f'班{r}')
+
                     class_details.append({
                         '科目': k,
-                        '班级': class_name, # 使用新名称
+                        '班级': display_name, # 使用新名称
                         '人数': size,
                         '时段': slot_str,
                         '学生配套': ', '.join(students_sorted)
                     })
-        class_details.sort(key=lambda x: x['科目'])
-
-        # --- 步骤 3: 生成时段总表 (合并分割课程逻辑) ---
-        slot_schedule_data = []
         
-        # 使用自然排序，确保S1, S2, ..., S9, S10, S11的正确顺序
+        # ========== 第三步：生成时段总表 (合并同配套课程) ==========
+        # 1. 收集原始碎片数据
+        raw_slot_data = []
+        
+        # 按自然顺序遍历时段组
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
             group_slots = self.SLOT_GROUPS[group_name]
             
-            # 临时存储桶：key=学生配套集合(frozenset), value=该时段内的课程列表
-            # 目的是把同一拨学生在同一时段上的不同课归类到一起
-            student_group_batches = defaultdict(list)
-            
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
-                    # 检查该班级在这个时段组内是否有课
-                    active_sub_slots = [t for t in group_slots if solver.Value(y_rt[(k, r, t)]) == 1]
+                    # 计算该班级在这个时段组内的实际时长
+                    actual_hours = sum(1 for t in group_slots if solver.Value(y_rt[(k, r, t)]) == 1)
                     
-                    if active_sub_slots:
-                        # 获取上这门课的学生配套
+                    if actual_hours > 0:
                         students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
                         if not students: continue
                         
                         size = sum(self.packages[p]['人数'] for p in students)
-                        class_name = class_name_mapping[k].get(r, f"班{r}")
+                        students_sorted = sorted(students, key=natural_sort_key)
                         
-                        # 生成唯一Key：根据学生配套名单 (排序后转元组，保证唯一性)
-                        students_key = tuple(sorted(students))
+                        # 生成唯一键：用于识别是否是同一群学生
+                        students_key = tuple(students_sorted) 
+                        display_name = class_name_map.get((k, r), f'班{r}')
                         
-                        student_group_batches[students_key].append({
+                        raw_slot_data.append({
+                            'group': group_name,
+                            'students_key': students_key,
                             'subject': k,
-                            'class_name': class_name,
-                            'duration': len(active_sub_slots),
-                            'students': students,
+                            'class_name': display_name,
+                            'hours': actual_hours,
                             'size': size,
-                            'first_slot': min(active_sub_slots) # 用于内部排序，先上的课排前面
+                            'packages_str': ', '.join(students_sorted)
                         })
+
+        # 2. 合并逻辑
+        # 键: (时段名, 学生群体元组) -> 值: 聚合数据
+        merged_map = {}
+        
+        for item in raw_slot_data:
+            key = (item['group'], item['students_key'])
             
-            # 处理聚合后的数据，生成表格行
-            for students_tuple, class_list in student_group_batches.items():
-                # 按实际上课时间排序 (例如先上化学再上商业)
-                class_list.sort(key=lambda x: x['first_slot'])
-                
-                students_str = ', '.join(sorted(list(students_tuple), key=natural_sort_key))
-                total_size = class_list[0]['size'] # 同一拨学生，人数是一样的
-                
-                if len(class_list) == 1:
-                    # 情况A: 没有分割，只有一门课
-                    item = class_list[0]
-                    slot_schedule_data.append({
-                        '时段': group_name,
-                        '时长': f"{item['duration']}h",
-                        '科目': item['subject'],
-                        '班级': item['class_name'],
-                        '人数': total_size,
-                        '涉及配套': students_str
-                    })
-                else:
-                    # 情况B: 出现分割，合并显示！
-                    # 格式: 化学(1h) + 商业(1h)
-                    combined_subject = " + ".join([f"{item['subject']}({item['duration']}h)" for item in class_list])
-                    # 格式: 班A + 班B
-                    combined_class = " + ".join([item['class_name'] for item in class_list])
-                    # 总时长
-                    total_duration = sum(item['duration'] for item in class_list)
-                    
-                    slot_schedule_data.append({
-                        '时段': group_name,
-                        '时长': f"{total_duration}h", # 显示总时长
-                        '科目': combined_subject,     # 合并后的科目名
-                        '班级': combined_class,       # 合并后的班级名
-                        '人数': total_size,
-                        '涉及配套': students_str
-                    })
+            if key not in merged_map:
+                merged_map[key] = {
+                    'group': item['group'],
+                    'subjects_display': [], # 用于存储 "化学(1h)"
+                    'classes_display': [],  # 用于存储 "化学班A"
+                    'total_hours': 0,
+                    'size': item['size'],
+                    'packages_str': item['packages_str'],
+                    'sort_order': natural_sort_key(item['group']) # 用于最后排序
+                }
+            
+            # 添加当前科目的信息
+            merged_map[key]['subjects_display'].append(f"{item['subject']}({item['hours']}h)")
+            merged_map[key]['classes_display'].append(f"{item['subject']}{item['class_name']}")
+            merged_map[key]['total_hours'] += item['hours']
+
+        # 3. 转换为最终列表
+        slot_schedule_data = []
+        
+        # 排序：先按时段顺序，再按总人数降序（大课在前）
+        sorted_items = sorted(merged_map.values(), 
+                            key=lambda x: (x['sort_order'], -x['size']))
+        
+        for data in sorted_items:
+            # 拼接显示字符串，例如 "化学(1h) + 商业(1h)"
+            subject_final = " + ".join(data['subjects_display'])
+            class_final = " + ".join(data['classes_display'])
+            
+            slot_schedule_data.append({
+                '时段': data['group'],
+                '时长': f"{data['total_hours']}h",
+                '科目': subject_final,
+                '班级': class_final,
+                '人数': data['size'],
+                '涉及配套': data['packages_str']
+            })
         
         return class_details, slot_schedule_data
 
@@ -1003,8 +1008,8 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         st.markdown('</div>', unsafe_allow_html=True)
                 
                 with tab2:
-                    st.markdown("### 🕐 时段总表")
-                    st.markdown("*注：如果显示为 `科目A(1h) + 科目B(1h)`，表示同一拨学生在该时段先后上这两门课。*")
+                    st.markdown("### 🕐 时段总表（分行显示）")
+                    st.markdown("*每个班级单独一行，清晰显示涉及的配套*")
                     
                     df_slot = pd.DataFrame(sol['slot_schedule'])
                     
@@ -1021,10 +1026,10 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         st.metric("总时段数", unique_slots)
                     with col2:
                         total_classes = len(df_slot)
-                        st.metric("总条目数", total_classes)
+                        st.metric("总班次数", total_classes)
                     with col3:
                         avg_classes_per_slot = total_classes / unique_slots if unique_slots > 0 else 0
-                        st.metric("平均每时段条目数", f"{avg_classes_per_slot:.1f}")
+                        st.metric("平均每时段班级数", f"{avg_classes_per_slot:.1f}")
                 
                 with tab3:
                     # 导出为Excel
