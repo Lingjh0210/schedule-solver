@@ -391,12 +391,43 @@ class ScheduleSolver:
         )
         
         if objective_type == 'min_classes':
+            # 方案A：铁血节省资源。每开一个班罚分极大，绝不多开班。
             model.Minimize(total_classes * 100000 + slot_split_penalty + priority_penalty)
+            
         elif objective_type == 'balanced':
-            # 修复：只对实际开班的班级计算min/max，避免包含未开班班级的0值
-            # 为每个班级创建"有效大小"变量
-            effective_sizes_for_max = []
-            effective_sizes_for_min = []
+            # 方案B：为了公平可以牺牲一点资源。
+            # 这里的逻辑调整：
+            # 1. total_classes 权重降为 5000 (原本是100万)
+            # 2. (max-min) 权重设为 100 (每差1人罚100分)
+            # 
+            # 算笔账：
+            # 如果现有方案是 2个班 (50人, 10人)，差值40。
+            # 分数 = 2*5000 + 40*100 = 10,000 + 4,000 = 14,000
+            # 
+            # 如果多开1个班变成 3个班 (20人, 20人, 20人)，差值0。
+            # 分数 = 3*5000 + 0*100 = 15,000
+            # 
+            # 此时求解器依然会选择少开班(14000 < 15000)。
+            # 但如果我们把 total_classes 降得更低，或者把 max-min 提得更高，求解器就会倒戈。
+            
+            # 建议配置：允许为了显著的均衡提升而多开班
+            # 开班成本 2000， 均衡收益(每1人差值) 50
+            # 这样如果多开一个班(成本2000)能减少 >40人的差值(40*50=2000)，它就会去多开班。
+            
+            # max_size 和 min_size 已经在上面定义好了，这里直接用
+            
+            # --- 核心修改：调整权重 ---
+            # 降低开班权重的绝对统治力，提升均衡权重
+            weight_class = 5000  # 开一个班的“成本”
+            weight_balance = 200 # 不均衡的“罚款”（每差1人罚100）
+            weight_split = self.config.get('slot_split_penalty', 1000) # 时段分割罚款
+            
+            model.Minimize(
+                total_classes * weight_class + 
+                (max_size - min_size) * weight_balance + 
+                slot_split_penalty * (weight_split / 100) + # 保持适度的分割惩罚
+                priority_penalty
+            )
             
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
