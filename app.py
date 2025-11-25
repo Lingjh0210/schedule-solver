@@ -523,13 +523,11 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据（排序优化版）
+        提取课表数据（N元合并终极版）
         1. 班级命名：按人数降序命名为 A, B, C...
-        2. 排序强制：开班详情列表强制按 科目+班级(A<B) 排序
-        3. 时段总表：执行"配对合并"策略
+        2. 时段总表：不再限制为2个配对，而是支持任意数量的碎片课程合并。
+           只要是同一群学生在同一时段内的课（例如 1h+1h+1h），都会按时间顺序合并。
         """
-        import itertools
-        
         solver = result['solver']
         u_r = result['variables']['u_r']
         y_rt = result['variables']['y_rt']
@@ -552,7 +550,7 @@ class ScheduleSolver:
                 new_name = f"班{chr(65 + index)}"
                 class_name_map[(k, item['r'])] = new_name
 
-        # ========== 第二步：生成开班详情 ==========
+        # ========== 第二步：生成开班详情 (按 科目 -> 班级 排序) ==========
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -579,91 +577,80 @@ class ScheduleSolver:
                         '学生配套': ', '.join(students_sorted)
                     })
         
-        # [核心修改] 强制排序：先按科目名，再按班级名(班A < 班B)
-        # 这样在 tab1 显示时，A班一定在 B班前面
+        # 强制排序：科目名 -> 班级名
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 第三步：生成时段总表 (前后半段配对合并) ==========
+        # ========== 第三步：生成时段总表 (N元聚合逻辑) ==========
         slot_schedule_data = []
         
+        # 遍历每个时段组 (S1...S10...)
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
-            group_slots = self.SLOT_GROUPS[group_name]
-            first_slot_idx = group_slots[0] 
+            group_slots = self.SLOT_GROUPS[group_name] # 例如 [19, 20, 21]
             
-            full_items = []
-            first_half_items = []
-            second_half_items = []
+            # 临时字典：用于聚合同一群学生的课
+            # Key: 学生配套的tuple (唯一的学生群体标识)
+            # Value: 该群体在这个时段内的所有课程片段列表
+            merge_bucket = defaultdict(list)
             
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
+                    # 找出该班级在这个时段组内的具体时间点
                     active_slots_in_group = [t for t in group_slots if solver.Value(y_rt[(k, r, t)]) == 1]
                     actual_hours = len(active_slots_in_group)
                     
                     if actual_hours == 0: continue
-                        
+                    
+                    # 获取该班级的基本信息
                     students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
+                    if not students: continue
+                    
                     size = sum(self.packages[p]['人数'] for p in students)
-                    students_str = ', '.join(sorted(students, key=natural_sort_key))
+                    students_sorted = sorted(students, key=natural_sort_key)
+                    students_key = tuple(students_sorted) # 用作字典键
                     display_name = class_name_map.get((k, r), f'班{r}')
                     
-                    item_data = {
+                    # 记录这个片段，最关键的是记录 start_time 用于后续排序
+                    merge_bucket[students_key].append({
                         'subject': f"{k}({actual_hours}h)",
-                        'class_name': f"{k}{display_name}", 
-                        'packages': students_str,
+                        'class_name': f"{k}{display_name}", # 显示为 化学班A
+                        'packages_str': ', '.join(students_sorted),
                         'size': size,
-                        'raw_hours': actual_hours
-                    }
-                    
-                    if actual_hours == len(group_slots):
-                        full_items.append(item_data)
-                    elif first_slot_idx in active_slots_in_group:
-                        first_half_items.append(item_data)
-                    else:
-                        second_half_items.append(item_data)
+                        'raw_hours': actual_hours,
+                        'start_time': min(active_slots_in_group) # 关键：用于确定课程先后顺序
+                    })
             
-            # 1. 占满全时段
-            for item in full_items:
+            # --- 处理聚合结果 ---
+            # 对每个学生群体，合并他们的课程
+            # 先按人数降序排序，让大课排在前面
+            sorted_student_groups = sorted(merge_bucket.items(), key=lambda x: -x[1][0]['size'])
+            
+            for _, items in sorted_student_groups:
+                # 1. 组内排序：确保 19点的课 排在 20点的课 前面
+                items.sort(key=lambda x: x['start_time'])
+                
+                # 2. 合并信息
+                merged_subject = " + ".join([i['subject'] for i in items])     # 化学(1h) + 物理(1h) + 历史(1h)
+                merged_class = " + ".join([i['class_name'] for i in items])   # 化学班A + 物理班B + 历史班C
+                
+                # 人数显示：如果是 5+5+5 显示为 5；如果是 5+8+5 显示为 5+8+5 (虽然逻辑上同一群人人数应该一样，但为了严谨)
+                # 这里的逻辑是：同一群学生配套必然人数相同，但以防万一
+                merged_size_list = [str(i['size']) for i in items]
+                if len(set(merged_size_list)) == 1:
+                    merged_size = merged_size_list[0] # 人数一样，只显示一个
+                else:
+                    merged_size = "+".join(merged_size_list) # 理论上不应发生，但作为防错
+                
+                merged_packages = items[0]['packages_str'] # 配套是一样的，取第一个即可
+                total_hours = sum(i['raw_hours'] for i in items)
+                
                 slot_schedule_data.append({
                     '时段': group_name,
-                    '时长': f"{item['raw_hours']}h",
-                    '科目': item['subject'],
-                    '班级': item['class_name'],
-                    '人数': item['size'],
-                    '涉及配套': item['packages']
+                    '时长': f"{total_hours}h",
+                    '科目': merged_subject,
+                    '班级': merged_class,
+                    '人数': merged_size,
+                    '涉及配套': merged_packages
                 })
-                
-            # 2. 配对合并
-            first_half_items.sort(key=lambda x: -x['size'])
-            second_half_items.sort(key=lambda x: -x['size'])
-            
-            for item1, item2 in itertools.zip_longest(first_half_items, second_half_items):
-                if item1 and item2:
-                    slot_schedule_data.append({
-                        '时段': group_name,
-                        '时长': f"{item1['raw_hours'] + item2['raw_hours']}h",
-                        '科目': f"{item1['subject']} + {item2['subject']}",
-                        '班级': f"{item1['class_name']} + {item2['class_name']}",
-                        '人数': f"{item1['size']}+{item2['size']}",
-                        '涉及配套': f"{item1['packages']} + {item2['packages']}"
-                    })
-                elif item1:
-                    slot_schedule_data.append({
-                        '时段': group_name,
-                        '时长': f"{item1['raw_hours']}h",
-                        '科目': item1['subject'],
-                        '班级': item1['class_name'],
-                        '人数': item1['size'],
-                        '涉及配套': item1['packages']
-                    })
-                elif item2:
-                    slot_schedule_data.append({
-                        '时段': group_name,
-                        '时长': f"{item2['raw_hours']}h",
-                        '科目': item2['subject'],
-                        '班级': item2['class_name'],
-                        '人数': item2['size'],
-                        '涉及配套': item2['packages']
-                    })
         
         return class_details, slot_schedule_data
 
