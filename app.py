@@ -513,19 +513,16 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据（智能命名+空格优化版）
-        1. 班级命名：
-           - 单班科目 -> 不显示后缀（内部标记为"班"）
-           - 多班科目 -> 显示 A, B...（按人数降序）
-        2. 时段总表格式：
-           - 多班：科目 + 空格 + 班号 + (时长) -> "化学 A(1h)"
-           - 单班：科目 + (时长) -> "化学(1h)"
+        提取课表数据（数据传输修复版）
+        1. 确保 'packages_str' 正确传递给 display_items，解决前端不显示的问题。
+        2. 保持之前的所有格式优化（空格、智能命名、空缺填补）。
         """
         solver = result['solver']
         u_r = result['variables']['u_r']
         y_rt = result['variables']['y_rt']
         u_pkr = result['variables']['u_pkr']
         
+        # ========== 1. 班级命名映射 ==========
         class_name_map = {} 
         for k in self.subjects:
             active_classes = []
@@ -534,7 +531,6 @@ class ScheduleSolver:
                     students = [p for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1]
                     size = sum(self.packages[p]['人数'] for p in students)
                     active_classes.append({'r': r, 'size': size})
-            
             active_classes.sort(key=lambda x: (-x['size'], x['r']))
             
             if len(active_classes) > 1:
@@ -544,7 +540,7 @@ class ScheduleSolver:
                 for item in active_classes:
                     class_name_map[(k, item['r'])] = "班"
 
-        # Class Details
+        # ========== 2. 开班详情 ==========
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -556,24 +552,23 @@ class ScheduleSolver:
                     for t in time_slots:
                         slot_groups_used[self.SLOT_TO_GROUP[t]].append(t)
                     slot_str = ', '.join([f"{g}({len(slots)}h)" for g, slots in sorted(slot_groups_used.items(), key=lambda x: natural_sort_key(x[0]))])
-                    
-                    display_name = class_name_map.get((k, r), f'班{r}')
-                    
                     class_details.append({
                         '科目': k,
-                        '班级': display_name,
+                        '班级': class_name_map.get((k, r), f'班{r}'),
                         '人数': size,
                         '时段': slot_str,
                         '学生配套': ', '.join(sorted(students, key=natural_sort_key))
                     })
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
+        # ========== 3. 时段总表 ==========
         slot_schedule_data = []
         
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
             group_slots = self.SLOT_GROUPS[group_name]
             group_slots_set = set(group_slots)
-
+            
+            # 3.1 收集碎片
             fragments = []
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -596,7 +591,7 @@ class ScheduleSolver:
                         'is_gap': False
                     })
             
-            # Greedy Construct
+            # 3.2 贪心拼图
             fragments.sort(key=lambda x: -x['size'])
             visual_rows = []
             for frag in fragments:
@@ -610,8 +605,8 @@ class ScheduleSolver:
                         row.append(frag); placed = True; break
                 if not placed: visual_rows.append([frag])
             
+            # 3.3 填空 & 格式化
             for row_items in visual_rows:
-                # Gap Filling
                 occupied_slots = set()
                 for item in row_items: occupied_slots.update(item['active_slots'])
                 missing_slots = sorted(list(group_slots_set - occupied_slots))
@@ -634,18 +629,17 @@ class ScheduleSolver:
                 
                 row_items.sort(key=lambda x: x['start_time'])
                 
+                # Excel 文本拼接
                 merged_items_str = []
                 for i in row_items:
                     if i['is_gap']:
                         item_str = f"{i['subject']}({i['duration_str']})"
                     else:
                         cls_short = i['class_name'].replace('班', '') 
-                        
                         if cls_short:
                             item_str = f"{i['subject']} {cls_short}({i['duration_str']})"
                         else:
                             item_str = f"{i['subject']}({i['duration_str']})"
-                    
                     merged_items_str.append(item_str)
                 
                 merged_info = " + ".join(merged_items_str)
@@ -656,18 +650,18 @@ class ScheduleSolver:
                     for p in i['raw_packages']: unique_pkgs.add(p)
                 unique_count = sum(self.packages[p]['人数'] for p in unique_pkgs)
                 
-                # UI Display Items
+                # [关键修改] 构造 UI 用的数据对象
                 display_list = []
                 for idx, item in enumerate(row_items):
                     ui_class = item['class_name'].replace('班', '')
-                    
                     display_list.append({
                         'seq': idx + 1,
                         'subject': item['subject'],
                         'duration': item['duration_str'],
-                        'class': ui_class, # UI卡片上如果没A就不显示
+                        'class': ui_class,
                         'color_seed': item['subject'] if not item['is_gap'] else 'gap',
-                        'is_gap': item['is_gap']
+                        'is_gap': item['is_gap'],
+                        'packages_str': item['packages_str'] # <--- 必须有这一行！
                     })
 
                 slot_schedule_data.append({
@@ -1050,7 +1044,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     if not schedule_data:
                         st.info("暂无数据")
                     else:
-                        # ========== HTML 表格 (物理三列稳定版) ==========
+                        # ========== HTML 表格 (表头命名优化版) ==========
                         
                         table_css = """
                         <style>
@@ -1060,9 +1054,9 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 border-collapse: collapse;
                                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                                 margin-bottom: 1rem;
-                                font-size: 14px; /* 字号微调 */
+                                font-size: 14px;
                                 color: #ffffff; 
-                                table-layout: fixed; /* 固定布局 */
+                                table-layout: fixed;
                             }
                             
                             /* 表头样式 */
@@ -1071,12 +1065,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 color: #ffffff;
                                 font-weight: 700;
                                 padding: 10px 6px;
-                                text-align: center; /* 统一居中 */
+                                text-align: center;
                                 border-bottom: 2px solid #4a4a4a;
                                 border-top: 1px solid #4a4a4a;
                                 white-space: nowrap;
                                 overflow: hidden;
-                                text-overflow: ellipsis;
                             }
                             
                             /* 单元格样式 */
@@ -1092,13 +1085,13 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             .group-border-bottom { border-bottom: 3px solid #666666 !important; }
                             .normal-border-bottom { border-bottom: 1px solid #333333; }
                             
-                            /* === 列宽定义 (总和 100%) === */
+                            /* === 列宽定义 === */
                             .col-slot { width: 50px; font-weight: 800; color: #4fc3f7; background-color: #1a1c24; border-right: 2px solid #4a4a4a !important; text-align: center !important;}
                             .col-duration { width: 40px; text-align: center !important; color: #90caf9; }
-                            .col-flow { width: 30%; } /* 课程流程 */
+                            .col-flow { width: 30%; } 
                             .col-count { width: 40px; text-align: center !important; font-weight: bold; color: #fff; }
                             
-                            /* 配套三列，平分剩余空间 */
+                            /* 配套三列 */
                             .col-pkg { width: 20%; color: #b0bec5; font-size: 0.85rem; text-align: center !important; }
                             
                             /* === 卡片样式 === */
@@ -1164,13 +1157,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 # 3. 人数
                                 row_html += f"<td class='col-count'>{item['人数']}</td>"
                                 
-                                # 4. [核心修复] 物理三列配套
-                                # 我们直接生成 3 个 td 单元格
+                                # 4. [物理三列] 科目1, 科目2, 科目3
                                 for grid_idx in range(3):
                                     content = "-"
                                     if grid_idx < len(display_items):
                                         d_item = display_items[grid_idx]
-                                        # [防崩溃] 使用 .get 安全获取，如果没有该字段则显示 '-'
                                         pkg_str = d_item.get('packages_str', '-')
                                         if not pkg_str or d_item.get('is_gap', False): 
                                             pkg_str = "-"
@@ -1190,16 +1181,12 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                     <th class="col-duration">长</th>
                                     <th>课程流程</th>
                                     <th class="col-count">数</th>
-                                    <th class="col-pkg">配套 ①</th>
-                                    <th class="col-pkg">配套 ②</th>
-                                    <th class="col-pkg">配套 ③</th>
-                                </tr>
+                                    <th class="col-pkg">科目1</th> <th class="col-pkg">科目2</th> <th class="col-pkg">科目3</th> </tr>
                             </thead>
                             <tbody>{''.join(html_rows)}</tbody>
                         </table>
                         """
                         st.markdown(full_html, unsafe_allow_html=True)
-
                     # ========== 统计信息 ==========
                     st.markdown("### 📊 统计信息")
                     df_slot = pd.DataFrame(schedule_data)
