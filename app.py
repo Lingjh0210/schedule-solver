@@ -436,8 +436,8 @@ class ScheduleSolver:
 
             # ========== 2. 定义目标函数 (调整权重) ==========
             # 降低开班权重的绝对统治力，提升均衡权重
-            weight_class = 5000  # 开一个班的“成本” (降低，原为100万)
-            weight_balance = 200 # 不均衡的“罚款” (提升，每差1人罚200)
+            weight_class = 4000  # 开一个班的“成本” (降低，原为100万)
+            weight_balance = 300 # 不均衡的“罚款” (提升，每差1人罚200)
             weight_split = self.config.get('slot_split_penalty', 1000) # 时段分割罚款
             
             model.Minimize(
