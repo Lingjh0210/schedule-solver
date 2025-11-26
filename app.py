@@ -522,7 +522,6 @@ class ScheduleSolver:
         y_rt = result['variables']['y_rt']
         u_pkr = result['variables']['u_pkr']
         
-        # ========== 1. 班级命名映射 ==========
         class_name_map = {} 
         for k in self.subjects:
             active_classes = []
@@ -540,7 +539,7 @@ class ScheduleSolver:
                 for item in active_classes:
                     class_name_map[(k, item['r'])] = "班"
 
-        # ========== 2. 开班详情 ==========
+        # 开班详情
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -561,14 +560,13 @@ class ScheduleSolver:
                     })
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 3. 时段总表 ==========
+        # 时段总表
         slot_schedule_data = []
         
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
             group_slots = self.SLOT_GROUPS[group_name]
             group_slots_set = set(group_slots)
             
-            # 3.1 收集碎片
             fragments = []
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -591,7 +589,7 @@ class ScheduleSolver:
                         'is_gap': False
                     })
             
-            # 3.2 贪心拼图
+            # Greedy Construct
             fragments.sort(key=lambda x: -x['size'])
             visual_rows = []
             for frag in fragments:
@@ -605,7 +603,6 @@ class ScheduleSolver:
                         row.append(frag); placed = True; break
                 if not placed: visual_rows.append([frag])
             
-            # 3.3 填空 & 格式化
             for row_items in visual_rows:
                 occupied_slots = set()
                 for item in row_items: occupied_slots.update(item['active_slots'])
@@ -629,7 +626,7 @@ class ScheduleSolver:
                 
                 row_items.sort(key=lambda x: x['start_time'])
                 
-                # Excel 文本拼接
+                # Excel
                 merged_items_str = []
                 for i in row_items:
                     if i['is_gap']:
@@ -650,7 +647,6 @@ class ScheduleSolver:
                     for p in i['raw_packages']: unique_pkgs.add(p)
                 unique_count = sum(self.packages[p]['人数'] for p in unique_pkgs)
                 
-                # [关键修改] 构造 UI 用的数据对象
                 display_list = []
                 for idx, item in enumerate(row_items):
                     ui_class = item['class_name'].replace('班', '')
@@ -661,7 +657,7 @@ class ScheduleSolver:
                         'class': ui_class,
                         'color_seed': item['subject'] if not item['is_gap'] else 'gap',
                         'is_gap': item['is_gap'],
-                        'packages_str': item['packages_str'] # <--- 必须有这一行！
+                        'packages_str': item['packages_str'] 
                     })
 
                 slot_schedule_data.append({
@@ -1044,7 +1040,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     if not schedule_data:
                         st.info("暂无数据")
                     else:
-                        # ========== HTML 表格 (表头命名优化版) ==========
+                        # ========== HTML 表格 (时间槽对齐修复版) ==========
                         
                         table_css = """
                         <style>
@@ -1157,17 +1153,33 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 # 3. 人数
                                 row_html += f"<td class='col-count'>{item['人数']}</td>"
                                 
-                                # 4. [物理三列] 科目1, 科目2, 科目3
-                                for grid_idx in range(3):
-                                    content = "-"
-                                    if grid_idx < len(display_items):
-                                        d_item = display_items[grid_idx]
-                                        pkg_str = d_item.get('packages_str', '-')
-                                        if not pkg_str or d_item.get('is_gap', False): 
-                                            pkg_str = "-"
-                                        content = pkg_str
+                                # 4. [核心修复] 物理三列配套 - 基于时间槽填充
+                                # 初始化3个槽位
+                                pkg_slots = ["-", "-", "-"]
+                                current_cursor = 0 # 当前时间指针 (0, 1, 2)
+                                
+                                for d_item in display_items:
+                                    # 解析时长，例如 "2h" -> 2
+                                    try:
+                                        dur_val = int(d_item['duration'].replace('h', ''))
+                                    except:
+                                        dur_val = 1
                                     
-                                    row_html += f"<td class='col-pkg'>{content}</td>"
+                                    # 获取配套文字
+                                    pkg_str = d_item.get('packages_str', '-')
+                                    if not pkg_str or d_item.get('is_gap', False): 
+                                        pkg_str = "-"
+                                        
+                                    # 根据时长，填充对应数量的槽位
+                                    # 如果是 2h，会循环2次，把 pkg_str 填入 current 和 next
+                                    for _ in range(dur_val):
+                                        if current_cursor < 3:
+                                            pkg_slots[current_cursor] = pkg_str
+                                        current_cursor += 1
+                                
+                                # 渲染3个槽位
+                                for grid_idx in range(3):
+                                    row_html += f"<td class='col-pkg'>{pkg_slots[grid_idx]}</td>"
                                 
                                 row_html += "</tr>"
                                 html_rows.append(row_html)
@@ -1181,12 +1193,16 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                     <th class="col-duration">长</th>
                                     <th>课程流程</th>
                                     <th class="col-count">数</th>
-                                    <th class="col-pkg">科目1</th> <th class="col-pkg">科目2</th> <th class="col-pkg">科目3</th> </tr>
+                                    <th class="col-pkg">科目1</th>
+                                    <th class="col-pkg">科目2</th>
+                                    <th class="col-pkg">科目3</th>
+                                </tr>
                             </thead>
                             <tbody>{''.join(html_rows)}</tbody>
                         </table>
                         """
                         st.markdown(full_html, unsafe_allow_html=True)
+
                     # ========== 统计信息 ==========
                     st.markdown("### 📊 统计信息")
                     df_slot = pd.DataFrame(schedule_data)
