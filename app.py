@@ -1050,9 +1050,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     if not schedule_data:
                         st.info("暂无数据")
                     else:
+                        # ========== HTML 表格 (三列矩阵对齐版) ==========
                         
                         table_css = """
                         <style>
+                            /* 全局表格样式 */
                             .schedule-table {
                                 width: 100%;
                                 border-collapse: collapse;
@@ -1060,86 +1062,84 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 margin-bottom: 1rem;
                                 font-size: 15px;
                                 color: #ffffff; 
+                                table-layout: fixed; /* 固定布局，确保列宽稳定 */
                             }
+                            
+                            /* 表头样式 */
                             .schedule-table th {
                                 background-color: #262730;
                                 color: #ffffff;
                                 font-weight: 700;
                                 padding: 12px;
-                                text-align: left;
+                                text-align: center; /* 表头统一居中 */
                                 border-bottom: 2px solid #4a4a4a;
                                 border-top: 1px solid #4a4a4a;
                                 white-space: nowrap;
                             }
+                            
+                            /* 单元格通用样式 */
                             .schedule-table td {
-                                padding: 8px 12px; /* 减小内边距 */
+                                padding: 8px 6px;
                                 text-align: left;
                                 border-right: 1px solid #333333;
                                 color: #e0e0e0;
                                 vertical-align: middle;
+                                overflow: hidden; /* 防止内容溢出 */
                             }
+                            
+                            /* 边框分割线 */
                             .group-border-bottom { border-bottom: 3px solid #666666 !important; }
                             .normal-border-bottom { border-bottom: 1px solid #333333; }
                             
-                            .slot-column {
-                                font-weight: 800; font-size: 1.2rem;
-                                text-align: center !important;
-                                background-color: #1a1c24; color: #4fc3f7;
-                                width: 80px; border-right: 2px solid #4a4a4a !important;
-                            }
-                            .duration-column {
-                                text-align: center !important; width: 60px;
-                                font-weight: 600; color: #90caf9;
-                            }
+                            /* === 特定列宽设置 === */
+                            .col-slot { width: 60px; text-align: center !important; font-weight: 800; color: #4fc3f7; background-color: #1a1c24; border-right: 2px solid #4a4a4a !important; }
+                            .col-duration { width: 50px; text-align: center !important; color: #90caf9; font-weight: 600; }
+                            .col-flow { width: 35%; } /* 课程流程占宽一点 */
+                            .col-count { width: 50px; text-align: center !important; font-weight: bold; color: #fff; }
+                            .col-packages { width: 40%; padding: 0 !important; } /* 配套列：占剩余宽度，且去除内边距以便内部网格撑满 */
                             
-                            /* === 核心优化：流程卡片样式 === */
-                            .timeline-container {
-                                display: flex;
-                                align-items: center;
-                                flex-wrap: wrap; /* 如果屏幕太窄允许换行 */
-                                gap: 6px;
-                            }
+                            /* === 课程流程卡片样式 (保持不变) === */
+                            .timeline-container { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
                             .timeline-card {
-                                background-color: #333333;
-                                border: 1px solid #444;
-                                border-radius: 6px;
-                                padding: 4px 8px;
-                                display: flex;
-                                flex-direction: column;
-                                min-width: 110px;
+                                background-color: #333333; border: 1px solid #444; border-radius: 4px;
+                                padding: 3px 6px; display: flex; flex-direction: column; min-width: 90px;
                             }
-                            .card-header {
+                            .card-header { display: flex; align-items: center; margin-bottom: 1px; }
+                            .seq-badge {
+                                background-color: #0288d1; color: white; font-size: 0.7rem; font-weight: bold;
+                                width: 14px; height: 14px; border-radius: 50%;
+                                display: flex; align-items: center; justify-content: center; margin-right: 4px;
+                            }
+                            .subject-name { font-weight: 800; color: #fff; font-size: 0.85rem; }
+                            .card-footer { display: flex; justify-content: space-between; font-size: 0.75rem; color: #aaa; }
+                            .arrow-icon { color: #666; font-size: 1rem; margin: 0 1px; }
+
+                            /* === [核心修改] 配套三列网格样式 === */
+                            .pkg-grid-container {
+                                display: grid;
+                                grid-template-columns: 1fr 1fr 1fr; /* 强制分为3等份 */
+                                height: 100%;
+                                width: 100%;
+                            }
+                            .pkg-grid-item {
+                                border-right: 1px solid #444; /* 内部竖线分割 */
                                 display: flex;
                                 align-items: center;
-                                margin-bottom: 2px;
+                                justify-content: center;
+                                text-align: center;
+                                padding: 4px;
+                                font-size: 0.85rem;
+                                color: #b0bec5;
+                                min-height: 40px; /* 保证一定高度 */
+                                word-break: break-all; /* 允许长文本换行 */
                             }
-                            .seq-badge {
-                                background-color: #0288d1; /* 序号底色 */
-                                color: white;
-                                font-size: 0.75rem;
-                                font-weight: bold;
-                                width: 16px; height: 16px;
-                                border-radius: 50%;
-                                display: flex; align-items: center; justify-content: center;
-                                margin-right: 6px;
+                            .pkg-grid-item:last-child {
+                                border-right: none; /* 最后一列不要右边框 */
                             }
-                            .subject-name {
-                                font-weight: 800; color: #fff; font-size: 0.95rem;
+                            /* 对应空缺或无内容的样式 */
+                            .pkg-empty {
+                                color: #444;
                             }
-                            .card-footer {
-                                display: flex; justify-content: space-between;
-                                font-size: 0.8rem; color: #aaa;
-                            }
-                            .duration-tag {
-                                background-color: #424242; padding: 0 4px; border-radius: 3px;
-                            }
-                            .arrow-icon {
-                                color: #666; font-size: 1.2rem; font-weight: bold;
-                                margin: 0 2px;
-                            }
-                            
-                            .count-cell { font-weight: bold; font-size: 1.1rem; text-align: center; color: #fff; }
-                            .package-cell { color: #b0bec5; font-size: 0.9rem; }
                         </style>
                         """
                         
@@ -1153,71 +1153,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             for i, item in enumerate(group_items):
                                 border_class = "group-border-bottom" if i == row_count - 1 else "normal-border-bottom"
                                 row_html = f"<tr class='{border_class}'>"
-                                
-                                if i == 0:
-                                    row_html += f"<td class='slot-column' rowspan='{row_count}'>{item['时段']}</td>"
-                                    row_html += f"<td class='duration-column' rowspan='{row_count}'>{item['时长']}</td>"
-                                
-                                flow_html = '<div class="timeline-container">'
-                                display_items = item.get('display_items', [])
-                                
-                                for idx, d_item in enumerate(display_items):
-                                    card = f"""
-                                    <div class="timeline-card">
-                                        <div class="card-header">
-                                            <span class="seq-badge">{d_item['seq']}</span>
-                                            <span class="subject-name">{d_item['subject']}</span>
-                                        </div>
-                                        <div class="card-footer">
-                                            <span>{d_item['class']}</span>
-                                            <span class="duration-tag">{d_item['duration']}</span>
-                                        </div>
-                                    </div>
-                                    """
-                                    flow_html += card
-                                    
-                                    if idx < len(display_items) - 1:
-                                        flow_html += '<div class="arrow-icon">➜</div>'
-                                
-                                flow_html += '</div>'
-                                row_html += f"<td>{flow_html}</td>"
-                                
-                                row_html += f"<td class='count-cell'>{item['人数']}</td>"
-                                row_html += f"<td class='package-cell'>{item['涉及配套']}</td>"
-                                row_html += "</tr>"
-                                html_rows.append(row_html)
-                        
-                        full_html = f"""
-                        {table_css}
-                        <table class="schedule-table">
-                            <thead>
-                                <tr>
-                                    <th>时段</th>
-                                    <th>时长</th>
-                                    <th>课程流程 (顺序)</th> <th style="text-align: center;">人数</th>
-                                    <th>涉及配套</th>
-                                </tr>
-                            </thead>
-                            <tbody>{''.join(html_rows)}</tbody>
-                        </table>
-                        """
-                        st.markdown(full_html, unsafe_allow_html=True)
-
-                    # Define the results
-                    st.markdown("### 📊 统计信息")
-                    df_slot = pd.DataFrame(schedule_data)
-                    if 'display_items' in df_slot.columns:
-                        df_slot = df_slot.drop(columns=['display_items'])
-                        
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("总时段数", df_slot['时段'].nunique() if not df_slot.empty else 0)
-                    with col2:
-                        st.metric("总条目数", len(df_slot))
-                    with col3:
-                        unique = df_slot['时段'].nunique() if not df_slot.empty else 0
-                        avg = len(df_slot) / unique if unique > 0 else 0
-                        st.metric("平均每时段条目", f"{avg:.1f}")
                 # Export              
                 with tab3:
                     output = io.BytesIO()
