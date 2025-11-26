@@ -526,7 +526,6 @@ class ScheduleSolver:
         y_rt = result['variables']['y_rt']
         u_pkr = result['variables']['u_pkr']
         
-        # ========== 1. 班级命名映射 (智能 A/B) ==========
         class_name_map = {} 
         for k in self.subjects:
             active_classes = []
@@ -536,20 +535,16 @@ class ScheduleSolver:
                     size = sum(self.packages[p]['人数'] for p in students)
                     active_classes.append({'r': r, 'size': size})
             
-            # 按人数降序排序
             active_classes.sort(key=lambda x: (-x['size'], x['r']))
             
-            # [核心修改] 判断班级数量
             if len(active_classes) > 1:
-                # 只有当开班数 > 1 时，才分配 A, B, C...
                 for index, item in enumerate(active_classes):
                     class_name_map[(k, item['r'])] = f"班{chr(65 + index)}"
             else:
-                # 只有一个班，统一命名为"班" (后续去掉"班"字后就是空字符串)
                 for item in active_classes:
                     class_name_map[(k, item['r'])] = "班"
 
-        # ========== 2. 开班详情 ==========
+        # Class Details
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -562,7 +557,6 @@ class ScheduleSolver:
                         slot_groups_used[self.SLOT_TO_GROUP[t]].append(t)
                     slot_str = ', '.join([f"{g}({len(slots)}h)" for g, slots in sorted(slot_groups_used.items(), key=lambda x: natural_sort_key(x[0]))])
                     
-                    # 获取名称（可能是 "班A" 也可能是 "班"）
                     display_name = class_name_map.get((k, r), f'班{r}')
                     
                     class_details.append({
@@ -574,14 +568,12 @@ class ScheduleSolver:
                     })
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 3. 时段总表 ==========
         slot_schedule_data = []
         
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
             group_slots = self.SLOT_GROUPS[group_name]
             group_slots_set = set(group_slots)
-            
-            # 3.1 收集碎片
+
             fragments = []
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -604,7 +596,7 @@ class ScheduleSolver:
                         'is_gap': False
                     })
             
-            # 3.2 贪心拼图
+            # Greedy Construct
             fragments.sort(key=lambda x: -x['size'])
             visual_rows = []
             for frag in fragments:
@@ -618,7 +610,6 @@ class ScheduleSolver:
                         row.append(frag); placed = True; break
                 if not placed: visual_rows.append([frag])
             
-            # 3.3 填空 & 格式化
             for row_items in visual_rows:
                 # Gap Filling
                 occupied_slots = set()
@@ -643,22 +634,16 @@ class ScheduleSolver:
                 
                 row_items.sort(key=lambda x: x['start_time'])
                 
-                # [核心修改] 字符串拼接：增加空格逻辑
                 merged_items_str = []
                 for i in row_items:
                     if i['is_gap']:
-                        # Gap 显示: 0(1h)
                         item_str = f"{i['subject']}({i['duration_str']})"
                     else:
-                        # 正常课程
-                        # 把"班A"变成"A"，把"班"变成""
                         cls_short = i['class_name'].replace('班', '') 
                         
                         if cls_short:
-                            # 如果有A/B，加空格：化学 A(1h)
                             item_str = f"{i['subject']} {cls_short}({i['duration_str']})"
                         else:
-                            # 如果没A/B，不加空格：化学(1h)
                             item_str = f"{i['subject']}({i['duration_str']})"
                     
                     merged_items_str.append(item_str)
@@ -666,7 +651,6 @@ class ScheduleSolver:
                 merged_info = " + ".join(merged_items_str)
                 merged_packages = " + ".join([i['packages_str'] for i in row_items])
                 
-                # 去重人数
                 unique_pkgs = set()
                 for i in row_items:
                     for p in i['raw_packages']: unique_pkgs.add(p)
@@ -675,7 +659,6 @@ class ScheduleSolver:
                 # UI Display Items
                 display_list = []
                 for idx, item in enumerate(row_items):
-                    # UI显示的班级名，如果是单班（cls_short为空），显示为空
                     ui_class = item['class_name'].replace('班', '')
                     
                     display_list.append({
@@ -1237,56 +1220,42 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         st.metric("平均每时段条目", f"{avg:.1f}")
                 # Export              
                 with tab3:
-                    # 导出为Excel
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        # 获取数据
                         df_class = pd.DataFrame(sol['class_details'])
                         df_slot = pd.DataFrame(sol['slot_schedule'])
                         
-                        # 剔除辅助列
                         if 'display_items' in df_slot.columns:
                             df_slot = df_slot.drop(columns=['display_items'])
                         
-                        # 排序
                         df_class = df_class.sort_values(by=['科目', '班级'])
                         
-                        # 1. 写入 "开班详情" Sheet
                         df_class.to_excel(writer, sheet_name='开班详情', index=False)
                         
-                        # 2. 写入 "时段总表" Sheet
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
-                        # 3. [核心修改] 写入 "所有班级及涉及的配套" Sheet
                         df_overview = df_class.copy()
                         
-                        # 定义合并逻辑函数：处理空格和空后缀
                         def format_subject_class(row):
-                            # 去掉"班"字，得到 "A", "B" 或 "" (空字符串)
                             suffix = row['班级'].replace('班', '')
                             if suffix:
-                                # 如果有后缀，加空格：化学 A
                                 return f"{row['科目']} {suffix}"
                             else:
-                                # 没有后缀，直接返回科目名：化学
                                 return row['科目']
 
-                        # 应用逻辑
                         df_overview['科目 & 班级'] = df_overview.apply(format_subject_class, axis=1)
                         
-                        # 筛选列
                         df_overview = df_overview[['科目 & 班级', '学生配套']]
                         df_overview.columns = ['科目 SUBJECT', '配套 PACKAGE']
                         
                         df_overview.to_excel(writer, sheet_name='导入', index=False)
                         
-                        # === 自动调整列宽 ===
                         workbook = writer.book
                         for sheet_name in writer.sheets:
                             worksheet = writer.sheets[sheet_name]
                             if sheet_name == '时段总表':
                                 df_to_measure = df_slot
-                            elif sheet_name == '所有班级及涉及的配套':
+                            elif sheet_name == '导入':
                                 df_to_measure = df_overview
                             else:
                                 df_to_measure = df_class
