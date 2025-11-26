@@ -442,15 +442,49 @@ class ScheduleSolver:
         
         return model, {'u_r': u_r, 'y_rt': y_rt, 'u_pkr': u_pkr, 'x_prt': x_prt}
     
-    def solve(self, model, variables, timeout):
-        """求解模型"""
+    # [新增] 内部回调类，用于实时反馈求解进度
+    class SolutionPrinter(cp_model.CpSolverSolutionCallback):
+        def __init__(self, status_placeholder, scheme_name):
+            cp_model.CpSolverSolutionCallback.__init__(self)
+            self.status_placeholder = status_placeholder
+            self.scheme_name = scheme_name
+            self.solution_count = 0
+            self.start_time = time.time()
+
+        def on_solution_callback(self):
+            self.solution_count += 1
+            current_time = time.time()
+            elapsed = current_time - self.start_time
+            obj_value = self.ObjectiveValue()
+            
+            # 实时更新 Streamlit 界面
+            # 显示：方案名 | 已找到解的数量 | 当前耗时
+            self.status_placeholder.markdown(
+                f"⚙️ **{self.scheme_name}** - 正在疯狂计算... "
+                f"(已发现 **{self.solution_count}** 个可行方案, "
+                f"耗时: {elapsed:.1f}s)"
+            )
+
+    def solve(self, model, variables, timeout, status_placeholder=None, scheme_name=""):
+        """求解模型 (优化版：支持实时回调反馈)"""
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = timeout
         solver.parameters.log_search_progress = False
         solver.parameters.num_search_workers = 8
         
+        # 如果传入了 UI 占位符，就使用回调
+        callback = None
+        if status_placeholder and scheme_name:
+            callback = self.SolutionPrinter(status_placeholder, scheme_name)
+        
         start_time = time.time()
-        status = solver.Solve(model)
+        
+        # 求解时挂载回调
+        if callback:
+            status = solver.Solve(model, callback)
+        else:
+            status = solver.Solve(model)
+            
         solve_time = time.time() - start_time
         
         status_map = {
@@ -942,34 +976,45 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
-            status_text.markdown(f"🔄 **{sol_config['name']}** - 准备中...")
+            status_text.markdown(f"🔄 **{sol_config['name']}** - 准备数据...")
             percentage_text.markdown(f"**{int(progress * 100)}%**")
-            time.sleep(0.1)  # 短暂延迟使进度可见
             
             # 步骤2: 建模阶段
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
-            status_text.markdown(f"🏗️ **{sol_config['name']}** - 构建模型...")
+            status_text.markdown(f"🏗️ **{sol_config['name']}** - 构建数学模型...")
             percentage_text.markdown(f"**{int(progress * 100)}%**")
             
             model, variables = solver_instance.build_model(sol_config['type'])
             
-            # 步骤3: 求解阶段
+            # 步骤3: 求解阶段 (传入 status_text 实现实时反馈)
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
-            status_text.markdown(f"⚙️ **{sol_config['name']}** - 正在求解...")
+            
+            # 这里初始显示一下，随后会被回调覆盖
+            status_text.markdown(f"⚙️ **{sol_config['name']}** - 启动求解引擎...")
             percentage_text.markdown(f"**{int(progress * 100)}%**")
             
-            result = solver_instance.solve(model, variables, solver_timeout)
+            # [核心修改] 传入 status_text 和 name
+            result = solver_instance.solve(
+                model, 
+                variables, 
+                solver_timeout,
+                status_placeholder=status_text,
+                scheme_name=sol_config['name']
+            )
             
             if result['status'] == 'success':
                 result['name'] = sol_config['name']
                 result['analysis'] = solver_instance.analyze_solution(result)
                 result['class_details'], result['slot_schedule'] = solver_instance.extract_timetable(result)
                 solutions.append(result)
-                status_text.markdown(f"✅ **{sol_config['name']}** - 完成")
+                # 求解完成，显示最终状态
+                status_text.markdown(f"✅ **{sol_config['name']}** - 求解完成 (耗时 {result['solve_time']:.2f}s)")
+            else:
+                status_text.markdown(f"❌ **{sol_config['name']}** - 求解失败")
         
         # 完成后显示100%
         progress_bar.progress(1.0)
