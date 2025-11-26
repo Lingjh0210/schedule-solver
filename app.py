@@ -523,11 +523,12 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据（空缺填补版）
+        提取课表数据（科目班级合并版）
         1. 班级命名：A, B, C...
-        2. 时段总表：拼图合并 + 自动填补时间空缺。
-           如果 S9(3h) 的课只排在后两小时，前一小时会自动插入 "0(1h)"。
-           确保时间轴完整，显示为：0(1h) + 历史(1h) + 经济(1h)。
+        2. 时段总表：
+           - 拼图合并 + 自动填补空缺
+           - [核心修改] 将科目与班级合并为一列，格式为 "化学(1h)A + 物理(1h)B"
+           - 去除"班"字，空缺显示为 "0(1h)"
         """
         solver = result['solver']
         u_r = result['variables']['u_r']
@@ -547,7 +548,7 @@ class ScheduleSolver:
             for index, item in enumerate(active_classes):
                 class_name_map[(k, item['r'])] = f"班{chr(65 + index)}"
 
-        # ========== 2. 开班详情 ==========
+        # ========== 2. 开班详情 (保持分开，清晰展示) ==========
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -568,11 +569,11 @@ class ScheduleSolver:
                     })
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 3. 时段总表 (拼图 + 填空) ==========
+        # ========== 3. 时段总表 (拼图 + 填空 + 合并列) ==========
         slot_schedule_data = []
         
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
-            group_slots = self.SLOT_GROUPS[group_name] # e.g. [28, 29, 30]
+            group_slots = self.SLOT_GROUPS[group_name]
             group_slots_set = set(group_slots)
             
             # 3.1 收集碎片
@@ -595,7 +596,7 @@ class ScheduleSolver:
                         'raw_hours': actual_hours,
                         'active_slots': set(active_slots),
                         'start_time': min(active_slots),
-                        'is_gap': False # 标记：这是真实课程
+                        'is_gap': False
                     })
             
             # 3.2 贪心拼图
@@ -612,61 +613,55 @@ class ScheduleSolver:
                         row.append(frag); placed = True; break
                 if not placed: visual_rows.append([frag])
             
-            # 3.3 [核心修改] 填补空缺 (Gap Filling)
+            # 3.3 填补空缺 & 生成合并字符串
             for row_items in visual_rows:
-                # 计算这行已被占用的时间点
+                # Gap Filling
                 occupied_slots = set()
-                for item in row_items:
-                    occupied_slots.update(item['active_slots'])
-                
-                # 找出未被占用的时间点
+                for item in row_items: occupied_slots.update(item['active_slots'])
                 missing_slots = sorted(list(group_slots_set - occupied_slots))
                 
-                # 将连续的缺失时间点合并为一个 Gap 片段
                 if missing_slots:
                     import itertools
-                    # 分组连续数字：[1, 2, 5] -> [[1, 2], [5]]
                     for _, g in itertools.groupby(enumerate(missing_slots), lambda ix: ix[0] - ix[1]):
                         gap_group = list(map(lambda ix: ix[1], g))
-                        gap_len = len(gap_group)
-                        
-                        # 添加 Gap 片段
                         row_items.append({
-                            'subject': '0', # 显示为 0
-                            'duration_str': f"{gap_len}h",
+                            'subject': '0',
+                            'duration_str': f"{len(gap_group)}h",
                             'class_name': '-',
                             'packages_str': '-',
                             'raw_packages': [],
                             'size': 0,
-                            'raw_hours': 0, # 空缺不计入总学时
+                            'raw_hours': 0,
                             'active_slots': set(gap_group),
                             'start_time': min(gap_group),
-                            'is_gap': True # 标记：这是空缺
+                            'is_gap': True
                         })
                 
-                # 重新按时间排序，确保 0 在正确的位置
                 row_items.sort(key=lambda x: x['start_time'])
                 
-                # 3.4 生成输出字符串
-                # 拼接科目：例如 "0(1h) + 化学(1h)"
-                merged_subject = " + ".join([f"{i['subject']}({i['duration_str']})" for i in row_items])
+                # [核心修改] 合并科目与班级为一个字符串
+                # 格式：科目(时长)班号，例如 "化学(1h)A"
+                # 如果是空缺(Gap)，则只显示 "0(1h)"
+                merged_items_str = []
+                for i in row_items:
+                    if i['is_gap']:
+                        item_str = f"{i['subject']}({i['duration_str']})" # 0(1h)
+                    else:
+                        # 去掉"班"字
+                        cls_short = i['class_name'].replace('班', '')
+                        item_str = f"{i['subject']}({i['duration_str']}){cls_short}" # 化学(1h)A
+                    merged_items_str.append(item_str)
                 
-                # 拼接班级：空缺显示为"-"，例如 "- + 化学班A"
-                merged_class = " + ".join([
-                    f"{i['subject']}{i['class_name']}" if not i['is_gap'] else "-" 
-                    for i in row_items
-                ])
-                
-                # 拼接配套
+                merged_info = " + ".join(merged_items_str)
                 merged_packages = " + ".join([i['packages_str'] for i in row_items])
                 
-                # 计算去重人数 (只计算真实课程)
+                # 计算去重人数
                 unique_pkgs = set()
                 for i in row_items:
                     for p in i['raw_packages']: unique_pkgs.add(p)
                 unique_count = sum(self.packages[p]['人数'] for p in unique_pkgs)
                 
-                # 构造 UI 用的数据对象
+                # UI Display Items
                 display_list = []
                 for idx, item in enumerate(row_items):
                     display_list.append({
@@ -674,17 +669,14 @@ class ScheduleSolver:
                         'subject': item['subject'],
                         'duration': item['duration_str'],
                         'class': item['class_name'],
-                        'color_seed': item['subject'] if not item['is_gap'] else 'gap', # 空缺卡片用特殊颜色
+                        'color_seed': item['subject'] if not item['is_gap'] else 'gap',
                         'is_gap': item['is_gap']
                     })
 
                 slot_schedule_data.append({
                     '时段': group_name,
-                    # 时长显示：真实课时总和 (如果需要显示3h，可改为 len(group_slots))
-                    # 这里保持显示真实课时，比如 "2h" (中间空了1h)
-                    '时长': f"{sum(i['raw_hours'] for i in row_items)}h", 
-                    '科目': merged_subject,
-                    '班级': merged_class,
+                    '时长': f"{sum(i['raw_hours'] for i in row_items)}h",
+                    '科目 & 班级': merged_info,   # [已修改] 合并列，例如 "化学(1h)A + 物理(1h)B"
                     '人数': unique_count,
                     '涉及配套': merged_packages,
                     'display_items': display_list
@@ -1261,11 +1253,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         df_overview['科目 & 班级'] = df_overview['科目'] + df_overview['班级'].str.replace('班', '')
                         
                         #  - 只保留合并后的列、人数和配套
-                        df_overview = df_overview[['科目 & 班级', '人数', '学生配套']]
+                        df_overview = df_overview[['科目 & 班级', '学生配套']]
                         #  - 重命名配套列
-                        df_overview.columns = ['科目 & 班级', '人数', '涉及配套']
+                        df_overview.columns = ['科目 SUBJECT', '配套 PACKAGE']
                         
-                        df_overview.to_excel(writer, sheet_name='所有班级及涉及的配套', index=False)
+                        df_overview.to_excel(writer, sheet_name='导入', index=False)
                         
                         # === 自动调整列宽逻辑 ===
                         workbook = writer.book
@@ -1276,7 +1268,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             # 根据当前Sheet选择对应的DataFrame来计算列宽
                             if sheet_name == '时段总表':
                                 df_to_measure = df_slot
-                            elif sheet_name == '所有班级及涉及的配套':
+                            elif sheet_name == '导入':
                                 df_to_measure = df_overview
                             else:
                                 df_to_measure = df_class
