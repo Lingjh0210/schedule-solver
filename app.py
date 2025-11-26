@@ -523,12 +523,12 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据（科目班级合并版）
+        提取课表数据（格式调整版）
         1. 班级命名：A, B, C...
         2. 时段总表：
-           - 拼图合并 + 自动填补空缺
-           - [核心修改] 将科目与班级合并为一列，格式为 "化学(1h)A + 物理(1h)B"
-           - 去除"班"字，空缺显示为 "0(1h)"
+           - [核心修改] 格式调整为：科目+班号+(时长)
+           - 例如：从 "化学(1h)A" 改为 "化学A(1h)"
+           - 空缺显示为 "0(1h)"
         """
         solver = result['solver']
         u_r = result['variables']['u_r']
@@ -548,7 +548,7 @@ class ScheduleSolver:
             for index, item in enumerate(active_classes):
                 class_name_map[(k, item['r'])] = f"班{chr(65 + index)}"
 
-        # ========== 2. 开班详情 (保持分开，清晰展示) ==========
+        # ========== 2. 开班详情 ==========
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -569,7 +569,7 @@ class ScheduleSolver:
                     })
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 3. 时段总表 (拼图 + 填空 + 合并列) ==========
+        # ========== 3. 时段总表 ==========
         slot_schedule_data = []
         
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
@@ -613,7 +613,7 @@ class ScheduleSolver:
                         row.append(frag); placed = True; break
                 if not placed: visual_rows.append([frag])
             
-            # 3.3 填补空缺 & 生成合并字符串
+            # 3.3 填空 & 格式化
             for row_items in visual_rows:
                 # Gap Filling
                 occupied_slots = set()
@@ -639,23 +639,23 @@ class ScheduleSolver:
                 
                 row_items.sort(key=lambda x: x['start_time'])
                 
-                # [核心修改] 合并科目与班级为一个字符串
-                # 格式：科目(时长)班号，例如 "化学(1h)A"
-                # 如果是空缺(Gap)，则只显示 "0(1h)"
+                # [核心修改] 字符串拼接顺序：科目 + 班号 + (时长)
                 merged_items_str = []
                 for i in row_items:
                     if i['is_gap']:
-                        item_str = f"{i['subject']}({i['duration_str']})" # 0(1h)
+                        # Gap 显示: 0(1h)
+                        item_str = f"{i['subject']}({i['duration_str']})"
                     else:
-                        # 去掉"班"字
-                        cls_short = i['class_name'].replace('班', '')
-                        item_str = f"{i['subject']}({i['duration_str']}){cls_short}" # 化学(1h)A
+                        # 正常课程: 化学A(1h)
+                        cls_short = i['class_name'].replace('班', '') # 把"班A"变成"A"
+                        item_str = f"{i['subject']}{cls_short}({i['duration_str']})"
+                    
                     merged_items_str.append(item_str)
                 
                 merged_info = " + ".join(merged_items_str)
                 merged_packages = " + ".join([i['packages_str'] for i in row_items])
                 
-                # 计算去重人数
+                # 去重人数
                 unique_pkgs = set()
                 for i in row_items:
                     for p in i['raw_packages']: unique_pkgs.add(p)
@@ -676,7 +676,7 @@ class ScheduleSolver:
                 slot_schedule_data.append({
                     '时段': group_name,
                     '时长': f"{sum(i['raw_hours'] for i in row_items)}h",
-                    '科目 & 班级': merged_info,   # [已修改] 合并列，例如 "化学(1h)A + 物理(1h)B"
+                    '科目 & 班级': merged_info,
                     '人数': unique_count,
                     '涉及配套': merged_packages,
                     'display_items': display_list
