@@ -513,9 +513,10 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据（绝对时间对齐 + 科目聚类排序版）
-        1. 排序优化：同名科目（如所有物理）会排在一起，视觉更整洁。
-        2. 数据增强：计算 start_offset，确保配套列能进行绝对时间对齐。
+        提取课表数据（精确格子映射版）
+        1. 修复：不再假设课程连续。通过 relative_slots 传递精确的时间槽索引。
+           解决 "物理(2h)" 被 "化学(1h)" 覆盖或错位的问题。
+        2. 排序：按科目名称聚类排序。
         """
         solver = result['solver']
         u_r = result['variables']['u_r']
@@ -566,7 +567,7 @@ class ScheduleSolver:
         
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
             group_slots = self.SLOT_GROUPS[group_name]
-            group_start_time = min(group_slots) # 本组最早的时间点
+            group_start_time = min(group_slots)
             group_slots_set = set(group_slots)
             
             # 3.1 收集碎片
@@ -630,7 +631,6 @@ class ScheduleSolver:
                 
                 row_items.sort(key=lambda x: x['start_time'])
                 
-                # Excel 文本拼接
                 merged_items_str = []
                 for i in row_items:
                     if i['is_gap']:
@@ -655,8 +655,10 @@ class ScheduleSolver:
                 display_list = []
                 for idx, item in enumerate(row_items):
                     ui_class = item['class_name'].replace('班', '')
-                    # [核心] 计算相对于本组起始时间的偏移量 (0, 1, 2)
-                    start_offset = item['start_time'] - group_start_time
+                    
+                    # [核心修改] 计算该课程占用的所有相对槽位 [0, 1, 2]
+                    # 例如：如果 active_slots=[17, 19], group_start=17 -> relative=[0, 2]
+                    relative_slots = [t - group_start_time for t in item['active_slots']]
                     
                     display_list.append({
                         'seq': idx + 1,
@@ -666,7 +668,7 @@ class ScheduleSolver:
                         'color_seed': item['subject'] if not item['is_gap'] else 'gap',
                         'is_gap': item['is_gap'],
                         'packages_str': item['packages_str'],
-                        'start_offset': start_offset  # <--- 新增偏移量
+                        'relative_slots': relative_slots # <--- 传递精确的格子索引
                     })
 
                 slot_schedule_data.append({
@@ -676,11 +678,10 @@ class ScheduleSolver:
                     '人数': unique_count,
                     '涉及配套': merged_packages,
                     'display_items': display_list,
-                    'sort_key_subject': row_items[0]['subject'] if row_items else "" # 用于排序
+                    'sort_key_subject': row_items[0]['subject'] if row_items else ""
                 })
         
-        # [核心优化] 对生成的行进行排序：先按科目名称，再按人数
-        # 这样同名科目会聚在一起
+        # 排序：先按科目名，再按时段
         slot_schedule_data.sort(key=lambda x: (natural_sort_key(x['时段']), x['sort_key_subject']))
 
         return class_details, slot_schedule_data
@@ -1054,7 +1055,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     if not schedule_data:
                         st.info("暂无数据")
                     else:
-                        # ========== HTML 表格 (绝对时间对齐修复版) ==========
+                        # ========== HTML 表格 (精确槽位填充版) ==========
                         
                         table_css = """
                         <style>
@@ -1123,11 +1124,9 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         """
                         
                         html_rows = []
-                        # 注意：schedule_data 已经在 extract_timetable 里按科目排序过了
+                        # 确保按照时段排序，组内按 extract_timetable 的逻辑排序（已按科目排序）
                         from itertools import groupby
-                        # 这里只需要按时段分组即可，组内顺序保持 extract_timetable 的科目排序
-                        # 使用 sorted 确保 groupby 正常工作，但要用 stable sort 保持组内顺序
-                        # 不过 key 相同即可
+                        schedule_data.sort(key=lambda x: (natural_sort_key(x['时段']), x.get('sort_key_subject', '')))
                         
                         for slot_name, items in groupby(schedule_data, key=lambda x: x['时段']):
                             group_items = list(items)
@@ -1170,30 +1169,31 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 # 3. 人数
                                 row_html += f"<td class='col-count'>{item['人数']}</td>"
                                 
-                                # 4. [核心修复] 物理三列配套 - 绝对时间对齐
+                                # 4. [核心修复] 物理三列配套 - 精确槽位填充
                                 pkg_slots = ["-", "-", "-"]
                                 
                                 for d_item in display_items:
-                                    # 获取开始位置 (0, 1, 2)
-                                    start_idx = d_item.get('start_offset', 0)
+                                    # 获取精确的相对槽位列表，例如 [0, 2]
+                                    # 使用 .get 默认为 [] 防止旧数据报错
+                                    relative_slots = d_item.get('relative_slots', [])
                                     
-                                    # 解析时长 (2h -> 2)
-                                    try:
-                                        dur_val = int(d_item['duration'].replace('h', ''))
-                                    except:
-                                        dur_val = 1
-                                    
+                                    # 兼容旧逻辑：如果没有 relative_slots (比如 Gap)，尝试用 start_offset
+                                    if not relative_slots and 'start_offset' in d_item:
+                                         try:
+                                            dur = int(d_item['duration'].replace('h',''))
+                                         except: dur = 1
+                                         start = d_item['start_offset']
+                                         relative_slots = range(start, start + dur)
+
                                     # 获取内容
                                     pkg_str = d_item.get('packages_str', '-')
                                     if not pkg_str or d_item.get('is_gap', False): 
                                         pkg_str = "-"
                                     
-                                    # 填充槽位 (支持跨列)
-                                    # 如果 start_idx=0, dur=2 -> 填充 slot 0 和 1
-                                    for offset in range(dur_val):
-                                        target_idx = start_idx + offset
-                                        if 0 <= target_idx < 3:
-                                            pkg_slots[target_idx] = pkg_str
+                                    # 填充指定槽位
+                                    for slot_idx in relative_slots:
+                                        if 0 <= slot_idx < 3:
+                                            pkg_slots[slot_idx] = pkg_str
                                 
                                 for grid_idx in range(3):
                                     row_html += f"<td class='col-pkg'>{pkg_slots[grid_idx]}</td>"
@@ -1223,7 +1223,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     # ========== 统计信息 ==========
                     st.markdown("### 📊 统计信息")
                     df_slot = pd.DataFrame(schedule_data)
-                    # 剔除辅助列
                     cols_to_drop = ['display_items', 'sort_key_subject']
                     df_slot_export = df_slot.drop(columns=[c for c in cols_to_drop if c in df_slot.columns])
                     
