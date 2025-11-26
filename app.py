@@ -1191,29 +1191,32 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         df_class = pd.DataFrame(sol['class_details'])
                         df_slot = pd.DataFrame(sol['slot_schedule'])
                         
+                        # [修复] 剔除只用于网页显示的辅助列 'display_items'
+                        if 'display_items' in df_slot.columns:
+                            df_slot = df_slot.drop(columns=['display_items'])
+                        
                         # [重要] 确保开班详情按 科目 -> 班级(A,B) 排序
                         df_class = df_class.sort_values(by=['科目', '班级'])
                         
-                        # 1. 写入 "开班详情" Sheet (保持原样，分开显示)
+                        # 1. 写入 "开班详情" Sheet
                         df_class.to_excel(writer, sheet_name='开班详情', index=False)
                         
                         # 2. 写入 "时段总表" Sheet
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
-                        # 3. [修改] 写入 "所有班级及涉及的配套" Sheet
+                        # 3. 写入 "所有班级及涉及的配套" Sheet
                         #  - 先复制一份数据
                         df_overview = df_class.copy()
                         
-                        #  - [核心修改] 合并列并去除"班"字：例如 "化学" + "班A" -> "化学A"
-                        #    这里使用了 .str.replace('班', '') 将 '班A' 变成 'A'
+                        #  - 合并列并去除"班"字：例如 "化学" + "班A" -> "化学A"
                         df_overview['科目 & 班级'] = df_overview['科目'] + df_overview['班级'].str.replace('班', '')
                         
                         #  - 只保留合并后的列、人数和配套
-                        df_overview = df_overview[['科目 & 班级', '学生配套']]
+                        df_overview = df_overview[['科目 & 班级', '人数', '学生配套']]
                         #  - 重命名配套列
-                        df_overview.columns = ['科目 SUBJECT',  '配套 PACKAGE']
+                        df_overview.columns = ['科目 & 班级', '人数', '涉及配套']
                         
-                        df_overview.to_excel(writer, sheet_name='导入', index=False)
+                        df_overview.to_excel(writer, sheet_name='所有班级及涉及的配套', index=False)
                         
                         # === 自动调整列宽逻辑 ===
                         workbook = writer.book
@@ -1224,7 +1227,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             # 根据当前Sheet选择对应的DataFrame来计算列宽
                             if sheet_name == '时段总表':
                                 df_to_measure = df_slot
-                            elif sheet_name == '导入':
+                            elif sheet_name == '所有班级及涉及的配套':
                                 df_to_measure = df_overview
                             else:
                                 df_to_measure = df_class
