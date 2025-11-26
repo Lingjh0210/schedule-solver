@@ -11,6 +11,13 @@ import re
 from pathlib import Path
 import io
 import time
+import threading
+try:
+    # 适用于 Streamlit 1.12+
+    from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+except ImportError:
+    # 适用于旧版本
+    from streamlit.scriptrunner import add_script_run_ctx, get_script_run_ctx
 from ortools.sat.python import cp_model
 from collections import defaultdict
 from openpyxl.utils import get_column_letter
@@ -443,6 +450,7 @@ class ScheduleSolver:
         return model, {'u_r': u_r, 'y_rt': y_rt, 'u_pkr': u_pkr, 'x_prt': x_prt}
     
     # [新增] 内部回调类，用于实时反馈求解进度
+    # [修改] 内部回调类，增加上下文管理
     class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         def __init__(self, status_placeholder, scheme_name):
             cp_model.CpSolverSolutionCallback.__init__(self)
@@ -450,15 +458,23 @@ class ScheduleSolver:
             self.scheme_name = scheme_name
             self.solution_count = 0
             self.start_time = time.time()
+            
+            # [关键修复] 捕获当前 Streamlit 线程的上下文
+            try:
+                self.ctx = get_script_run_ctx()
+            except Exception:
+                self.ctx = None
 
         def on_solution_callback(self):
+            # [关键修复] 将 OR-Tools 的回调线程挂载到 Streamlit 上下文中
+            if self.ctx:
+                add_script_run_ctx(threading.current_thread(), self.ctx)
+                
             self.solution_count += 1
             current_time = time.time()
             elapsed = current_time - self.start_time
-            obj_value = self.ObjectiveValue()
             
             # 实时更新 Streamlit 界面
-            # 显示：方案名 | 已找到解的数量 | 当前耗时
             self.status_placeholder.markdown(
                 f"⚙️ **{self.scheme_name}** - 正在疯狂计算... "
                 f"(已发现 **{self.solution_count}** 个可行方案, "
@@ -466,7 +482,7 @@ class ScheduleSolver:
             )
 
     def solve(self, model, variables, timeout, status_placeholder=None, scheme_name=""):
-        """求解模型 (优化版：支持实时回调反馈)"""
+        """求解模型 (优化版：带上下文修复)"""
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = timeout
         solver.parameters.log_search_progress = False
