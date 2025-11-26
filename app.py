@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 排课求解器 Web UI
 基于 Streamlit 框架
@@ -13,16 +11,13 @@ import io
 import time
 import threading
 try:
-    # 适用于 Streamlit 1.12+
     from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 except ImportError:
-    # 适用于旧版本
     from streamlit.scriptrunner import add_script_run_ctx, get_script_run_ctx
 from ortools.sat.python import cp_model
 from collections import defaultdict
 from openpyxl.utils import get_column_letter
 
-# 页面配置
 st.set_page_config(
     page_title="智能排课求解器",
     page_icon="📚",
@@ -30,7 +25,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ========== 全局样式 ==========
 st.markdown("""
 <style>
     .main-header {
@@ -74,7 +68,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ========== 工具函数 ==========
 def natural_sort_key(s):
     """自然排序的key函数，用于正确排序包含数字的字符串
     例如: S1, S2, S3, ..., S9, S10, S11 (而不是 S1, S10, S11, S2)
@@ -89,8 +82,6 @@ def parse_subject_string(subject_str):
     输出: {'会计': 6, '历史': 4, '地理': 4, '商业': 3}
     """
     subjects = {}
-    # 匹配格式：科目名(数字) 或 科目名（数字）
-    # 同时支持英文括号() 和中文括号（）
     pattern = r'([^,\(（]+)[\(（](\d+)[\)）]'
     matches = re.findall(pattern, subject_str)
     for subject, hours in matches:
@@ -98,21 +89,20 @@ def parse_subject_string(subject_str):
         subjects[subject] = int(hours)
     return subjects
 
+# Read Excel File
 def parse_uploaded_file(uploaded_file):
     """解析上传的Excel/CSV文件"""
     try:
-        # 尝试读取Excel
         if uploaded_file.name.endswith('.xlsx') or uploaded_file.name.endswith('.xls'):
             df = pd.read_excel(uploaded_file)
         else:
-            # 尝试多种编码方式读取CSV
             encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5', 'cp936', 'utf-8-sig']
             df = None
             last_error = None
             
             for encoding in encodings:
                 try:
-                    uploaded_file.seek(0)  # 重置文件指针
+                    uploaded_file.seek(0)
                     df = pd.read_csv(uploaded_file, encoding=encoding)
                     st.success(f"✅ 成功读取文件（编码：{encoding}）")
                     break
@@ -123,7 +113,6 @@ def parse_uploaded_file(uploaded_file):
             if df is None:
                 raise Exception(f"无法识别文件编码，请确保文件是有效的CSV格式。最后错误：{last_error}")
         
-        # 解析数据
         packages = {}
         subject_hours = {}
         total_hours_stats = []
@@ -133,10 +122,8 @@ def parse_uploaded_file(uploaded_file):
             student_count = int(row['人数'])
             subject_str = str(row['科目'])
             
-            # 解析科目字符串
             subjects = parse_subject_string(subject_str)
             
-            # 计算该配套的总课时
             total_hours = sum(subjects.values())
             total_hours_stats.append({
                 '配套': package_name,
@@ -148,12 +135,10 @@ def parse_uploaded_file(uploaded_file):
                 '科目': subjects
             }
             
-            # 收集所有科目的课时（强制要求一致性）
             for subject, hours in subjects.items():
                 if subject not in subject_hours:
                     subject_hours[subject] = hours
                 elif subject_hours[subject] != hours:
-                    # 严重错误：课时不一致会导致约束冲突
                     st.error(f"❌ **数据错误：科目'{subject}'的课时不一致！**")
                     st.error(f"   • 在某些配套中是 **{subject_hours[subject]}小时**")
                     st.error(f"   • 在'{package_name}'配套中是 **{hours}小时**")
@@ -181,7 +166,6 @@ def parse_uploaded_file(uploaded_file):
                     """)
                     return None, None, None
         
-        # 显示总课时统计
         min_hours = min(s['总课时'] for s in total_hours_stats)
         max_hours = max(s['总课时'] for s in total_hours_stats)
         
@@ -189,7 +173,6 @@ def parse_uploaded_file(uploaded_file):
             st.info(f"ℹ️ 检测到部分配套总课时少于21小时（范围：{min_hours}-{max_hours}小时）")
             st.success("✅ 系统支持总课时不足的配套，这些配套将在某些时段不上课")
             
-            # 显示总课时不足的配套
             short_packages = [s for s in total_hours_stats if s['总课时'] < 21]
             if short_packages:
                 with st.expander("查看总课时不足21的配套"):
@@ -223,16 +206,12 @@ def calculate_recommended_slots(max_total_hours):
         推荐的时段组数
     """
     import math
-    # 如果最大课时<=3，至少需要1个时段组（3小时）
     if max_total_hours <= 3:
         return 1
-    # 否则计算需要的时段组数：n = ceil((max_hours - 1) / 2)
-    # 这样总容量 2n+1 >= max_hours
-    recommended = math.ceil((max_total_hours - 1) / 2)
-    # 至少2个时段组，最多20个
-    return max(2, min(recommended, 20))
 
-# ========== 排课求解器核心 ==========
+    recommended = math.ceil((max_total_hours - 1) / 2)
+    return max(2, min(recommended, 20))
+#Main Algorithms
 class ScheduleSolver:
     def __init__(self, packages, subject_hours, config):
         self.packages = packages
@@ -248,7 +227,6 @@ class ScheduleSolver:
             if i < config['num_slots']:
                 self.SLOT_GROUPS[f'S{i}'] = [i*2-1, i*2]
             else:
-                # 最后一个是3h时段
                 self.SLOT_GROUPS[f'S{i}'] = [i*2-1, i*2, i*2+1]
         
         self.SLOT_TO_GROUP = {}
@@ -262,7 +240,6 @@ class ScheduleSolver:
         """构建模型"""
         model = cp_model.CpModel()
         
-        # 决策变量
         u_r = {}
         y_rt = {}
         u_pkr = {}
@@ -281,8 +258,6 @@ class ScheduleSolver:
                     for t in self.TIME_SLOTS_1H:
                         x_prt[(p, k, r, t)] = model.NewBoolVar(f'x_{p}_{k}_{r}_{t}')
         
-        # 添加约束
-        # HA: 精确学时
         for k in self.subjects:
             H_k = self.subject_hours[k]
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -290,7 +265,6 @@ class ScheduleSolver:
                 model.Add(total_hours == H_k).OnlyEnforceIf(u_r[(k, r)])
                 model.Add(total_hours == 0).OnlyEnforceIf(u_r[(k, r)].Not())
         
-        # HB: 同师全修
         for p in self.package_names:
             for k in self.subjects:
                 if k in self.packages[p]['科目']:
@@ -299,7 +273,6 @@ class ScheduleSolver:
                     for r in range(1, self.config['max_classes_per_subject'] + 1):
                         model.Add(u_pkr[(p, k, r)] == 0)
         
-        # HC: 班额限制
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
                 class_size = sum(self.packages[p]['人数'] * u_pkr[(p, k, r)] for p in self.package_names)
@@ -307,7 +280,6 @@ class ScheduleSolver:
                 model.Add(class_size <= self.config['max_class_size']).OnlyEnforceIf(u_r[(k, r)])
                 model.Add(class_size == 0).OnlyEnforceIf(u_r[(k, r)].Not())
         
-        # H2: x_prt逻辑
         for p in self.package_names:
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -316,19 +288,16 @@ class ScheduleSolver:
                         model.Add(x_prt[(p, k, r, t)] <= y_rt[(k, r, t)])
                         model.Add(x_prt[(p, k, r, t)] >= u_pkr[(p, k, r)] + y_rt[(k, r, t)] - 1)
         
-        # H2': 配套时段互斥
         for p in self.package_names:
             for t in self.TIME_SLOTS_1H:
                 model.Add(sum(x_prt[(p, k, r, t)] 
                             for k in self.subjects 
                             for r in range(1, self.config['max_classes_per_subject'] + 1)) <= 1)
         
-        # H6: 教师资源约束
         for k in self.subjects:
             for t in self.TIME_SLOTS_1H:
                 model.Add(sum(y_rt[(k, r, t)] for r in range(1, self.config['max_classes_per_subject'] + 1)) <= 1)
         
-        # H1: 覆盖需求
         for p in self.package_names:
             for k in self.subjects:
                 if k in self.packages[p]['科目']:
@@ -340,21 +309,16 @@ class ScheduleSolver:
                     )
                     model.Add(total_hours_pk == required_hours)
         
-        # H4: 开班上限
         for k in self.subjects:
             model.Add(sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1)) <= self.config['max_classes_per_subject'])
         
-        # H5: 强制开班数
         for k, count in self.config['forced_class_count'].items():
             if k in self.subjects:
                 model.Add(sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1)) == count)
         
-        # 时段分割处理
         slot_split_penalty = 0
         
         if not self.config['allow_slot_split']:
-            # 不允许时段分割：添加硬约束
-            # 每个配套在每个时段组最多只能上一门课
             for p in self.package_names:
                 for group_name, group_slots in self.SLOT_GROUPS.items():
                     subjects_in_group = []
@@ -364,11 +328,9 @@ class ScheduleSolver:
                             model.AddMaxEquality(has_subject, [x_prt[(p, k, r, t)] for t in group_slots])
                             subjects_in_group.append(has_subject)
                     
-                    # 硬约束：每个时段组最多一门课
                     model.Add(sum(subjects_in_group) <= 1)
         
         else:
-            # 允许时段分割：添加软惩罚，尽量减少分割
             split_vars = []
             for p in self.package_names:
                 for group_name, group_slots in self.SLOT_GROUPS.items():
@@ -385,12 +347,9 @@ class ScheduleSolver:
                     model.Add(num_subjects <= 1).OnlyEnforceIf(is_split.Not())
                     split_vars.append(is_split)
             
-            # 软惩罚：减少分割次数
             slot_split_penalty = sum(split_vars) * self.config['slot_split_penalty']
         
-        # 目标函数
         total_classes = sum(u_r[(k, r)] for k in self.subjects for r in range(1, self.config['max_classes_per_subject'] + 1))
-        # 修复：使用max(0, ...)避免负惩罚，当选修人数>100时惩罚为0而非负数
         priority_penalty = sum(
             u_r[(k, r)] * r * max(0, 100 - self.subject_enrollment[k])
             for k in self.subjects 
@@ -398,47 +357,36 @@ class ScheduleSolver:
         )
         
         if objective_type == 'min_classes':
-            # 方案A：铁血节省资源。每开一个班罚分极大，绝不多开班。
             model.Minimize(total_classes * 100000 + slot_split_penalty + priority_penalty)
             
         elif objective_type == 'balanced':
-            # ========== 1. 定义 max_size 和 min_size (补回缺失的逻辑) ==========
-            # 为每个班级创建"有效大小"变量
-            # 用于计算 max_size 和 min_size，忽略未开启的班级
             effective_sizes_for_max = []
             effective_sizes_for_min = []
             
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
-                    # 计算该班级的实际人数
                     actual_size = sum(self.packages[p]['人数'] * u_pkr[(p, k, r)] for p in self.package_names)
                     
-                    # 有效大小（用于max）：如果开班则=实际大小，否则=0（不影响max计算）
                     eff_size_max = model.NewIntVar(0, 200, f'eff_max_{k}_{r}')
                     model.Add(eff_size_max == actual_size).OnlyEnforceIf(u_r[(k, r)])
                     model.Add(eff_size_max == 0).OnlyEnforceIf(u_r[(k, r)].Not())
                     effective_sizes_for_max.append(eff_size_max)
                     
-                    # 有效大小（用于min）：如果开班则=实际大小，否则=200（不影响min计算）
-                    # 注意：设为200是因为班额上限通常小于200，这样未开班的200不会成为最小值
                     eff_size_min = model.NewIntVar(0, 200, f'eff_min_{k}_{r}')
                     model.Add(eff_size_min == actual_size).OnlyEnforceIf(u_r[(k, r)])
                     model.Add(eff_size_min == 200).OnlyEnforceIf(u_r[(k, r)].Not())
                     effective_sizes_for_min.append(eff_size_min)
             
-            # 定义决策变量：所有开班班级中的最大值和最小值
             max_size = model.NewIntVar(0, 200, 'max_size')
             min_size = model.NewIntVar(0, 200, 'min_size')
             
-            # 绑定约束
             model.AddMaxEquality(max_size, effective_sizes_for_max)
             model.AddMinEquality(min_size, effective_sizes_for_min)
 
-            # ========== 2. 定义目标函数 (调整权重) ==========
-            # 降低开班权重的绝对统治力，提升均衡权重
-            weight_class = 5000  # 开一个班的“成本” (降低，原为100万)
-            weight_balance = 200 # 不均衡的“罚款” (提升，每差1人罚200)
-            weight_split = self.config.get('slot_split_penalty', 1000) # 时段分割罚款
+
+            weight_class = 5000 
+            weight_balance = 200 
+            weight_split = self.config.get('slot_split_penalty', 1000) 
             
             model.Minimize(
                 total_classes * weight_class + 
@@ -449,8 +397,6 @@ class ScheduleSolver:
         
         return model, {'u_r': u_r, 'y_rt': y_rt, 'u_pkr': u_pkr, 'x_prt': x_prt}
     
-    # [新增] 内部回调类，用于实时反馈求解进度
-    # [修改] 内部回调类，增加上下文管理
     class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         def __init__(self, status_placeholder, scheme_name):
             cp_model.CpSolverSolutionCallback.__init__(self)
@@ -459,14 +405,12 @@ class ScheduleSolver:
             self.solution_count = 0
             self.start_time = time.time()
             
-            # [关键修复] 捕获当前 Streamlit 线程的上下文
             try:
                 self.ctx = get_script_run_ctx()
             except Exception:
                 self.ctx = None
 
         def on_solution_callback(self):
-            # [关键修复] 将 OR-Tools 的回调线程挂载到 Streamlit 上下文中
             if self.ctx:
                 add_script_run_ctx(threading.current_thread(), self.ctx)
                 
@@ -474,7 +418,6 @@ class ScheduleSolver:
             current_time = time.time()
             elapsed = current_time - self.start_time
             
-            # 实时更新 Streamlit 界面
             self.status_placeholder.markdown(
                 f"⚙️ **{self.scheme_name}** - 正在疯狂计算... "
                 f"(已发现 **{self.solution_count}** 个可行方案, "
@@ -488,14 +431,12 @@ class ScheduleSolver:
         solver.parameters.log_search_progress = False
         solver.parameters.num_search_workers = 8
         
-        # 如果传入了 UI 占位符，就使用回调
         callback = None
         if status_placeholder and scheme_name:
             callback = self.SolutionPrinter(status_placeholder, scheme_name)
         
         start_time = time.time()
         
-        # 求解时挂载回调
         if callback:
             status = solver.Solve(model, callback)
         else:
@@ -546,7 +487,6 @@ class ScheduleSolver:
                     size = sum(self.packages[p]['人数'] for p in self.package_names if solver.Value(u_pkr[(p, k, r)]) == 1)
                     class_sizes.append(size)
         
-        # 统计时段分割
         split_count = 0
         split_details = []
         for p in self.package_names:
@@ -585,7 +525,6 @@ class ScheduleSolver:
         y_rt = result['variables']['y_rt']
         u_pkr = result['variables']['u_pkr']
         
-        # ========== 1. 班级命名映射 ==========
         class_name_map = {} 
         for k in self.subjects:
             active_classes = []
@@ -619,14 +558,12 @@ class ScheduleSolver:
                     })
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 3. 时段总表 ==========
         slot_schedule_data = []
         
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
             group_slots = self.SLOT_GROUPS[group_name]
             group_slots_set = set(group_slots)
             
-            # 3.1 收集碎片
             fragments = []
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -649,7 +586,7 @@ class ScheduleSolver:
                         'is_gap': False
                     })
             
-            # 3.2 贪心拼图
+            # 3.2 Greedy Construct
             fragments.sort(key=lambda x: -x['size'])
             visual_rows = []
             for frag in fragments:
@@ -663,9 +600,7 @@ class ScheduleSolver:
                         row.append(frag); placed = True; break
                 if not placed: visual_rows.append([frag])
             
-            # 3.3 填空 & 格式化
             for row_items in visual_rows:
-                # Gap Filling
                 occupied_slots = set()
                 for item in row_items: occupied_slots.update(item['active_slots'])
                 missing_slots = sorted(list(group_slots_set - occupied_slots))
@@ -689,15 +624,13 @@ class ScheduleSolver:
                 
                 row_items.sort(key=lambda x: x['start_time'])
                 
-                # [核心修改] 字符串拼接顺序：科目 + 班号 + (时长)
                 merged_items_str = []
                 for i in row_items:
                     if i['is_gap']:
-                        # Gap 显示: 0(1h)
                         item_str = f"{i['subject']}({i['duration_str']})"
                     else:
-                        # 正常课程: 化学A(1h)
-                        cls_short = i['class_name'].replace('班', '') # 把"班A"变成"A"
+
+                        cls_short = i['class_name'].replace('班', '') 
                         item_str = f"{i['subject']}{cls_short}({i['duration_str']})"
                     
                     merged_items_str.append(item_str)
@@ -705,7 +638,6 @@ class ScheduleSolver:
                 merged_info = " + ".join(merged_items_str)
                 merged_packages = " + ".join([i['packages_str'] for i in row_items])
                 
-                # 去重人数
                 unique_pkgs = set()
                 for i in row_items:
                     for p in i['raw_packages']: unique_pkgs.add(p)
@@ -734,7 +666,7 @@ class ScheduleSolver:
         
         return class_details, slot_schedule_data
 
-# ========== 主应用 ==========
+# main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #666;">走班制排课搜索系统</p>', unsafe_allow_html=True)
@@ -947,7 +879,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
     
     st.markdown("---")
     
-    # 求解按钮
+    # Solving button
     st.markdown('<div class="sub-header">🚀 开始求解</div>', unsafe_allow_html=True)
     
     if st.button("🎯 生成排课方案", type="primary", use_container_width=True):
@@ -967,13 +899,13 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             config
         )
         
-        # 生成多个方案
+        # Create 2 answer
         solution_configs = [
             {'type': 'min_classes', 'name': '方案A：最少开班'},
             {'type': 'balanced', 'name': '方案B：均衡班额'}
         ]
         
-        # 创建进度条容器
+        # Processing Bar
         progress_container = st.container()
         with progress_container:
             progress_bar = st.progress(0)
@@ -984,18 +916,16 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 percentage_text = st.empty()
         
         solutions = []
-        total_steps = len(solution_configs) * 3  # 每个方案3个步骤：准备、建模、求解
+        total_steps = len(solution_configs) * 3 
         current_step = 0
         
         for i, sol_config in enumerate(solution_configs):
-            # 步骤1: 准备阶段
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
             status_text.markdown(f"🔄 **{sol_config['name']}** - 准备数据...")
             percentage_text.markdown(f"**{int(progress * 100)}%**")
             
-            # 步骤2: 建模阶段
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
@@ -1004,16 +934,13 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             
             model, variables = solver_instance.build_model(sol_config['type'])
             
-            # 步骤3: 求解阶段 (传入 status_text 实现实时反馈)
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
             
-            # 这里初始显示一下，随后会被回调覆盖
             status_text.markdown(f"⚙️ **{sol_config['name']}** - 启动求解引擎...")
             percentage_text.markdown(f"**{int(progress * 100)}%**")
             
-            # [核心修改] 传入 status_text 和 name
             result = solver_instance.solve(
                 model, 
                 variables, 
@@ -1027,18 +954,15 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 result['analysis'] = solver_instance.analyze_solution(result)
                 result['class_details'], result['slot_schedule'] = solver_instance.extract_timetable(result)
                 solutions.append(result)
-                # 求解完成，显示最终状态
                 status_text.markdown(f"✅ **{sol_config['name']}** - 求解完成 (耗时 {result['solve_time']:.2f}s)")
             else:
                 status_text.markdown(f"❌ **{sol_config['name']}** - 求解失败")
         
-        # 完成后显示100%
         progress_bar.progress(1.0)
         percentage_text.markdown("**100%**")
         status_text.markdown("🎉 **所有方案求解完成！**")
         time.sleep(0.5)
         
-        # 清空进度条
         progress_bar.empty()
         status_text.empty()
         percentage_text.empty()
@@ -1063,12 +987,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         
         st.session_state['solutions'] = solutions
         
-        # 显示结果
+        # Show Solution
         st.markdown('<div class="success-box">', unsafe_allow_html=True)
         st.success(f"✅ 成功生成 {len(solutions)} 个方案！")
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # 显示方案结果
     if 'solutions' in st.session_state:
         st.markdown("---")
         st.markdown('<div class="sub-header">📊 方案对比</div>', unsafe_allow_html=True)
@@ -1089,7 +1012,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         df_comparison = pd.DataFrame(comparison_data)
         st.dataframe(df_comparison, use_container_width=True)
         
-        # 方案详情
+        # Details
         for sol in st.session_state['solutions']:
             with st.expander(f"📋 {sol['name']} - 详细结果"):
                 tab1, tab2, tab3 = st.tabs(["开班详情", "时段总表", "数据导出"])
@@ -1112,7 +1035,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     if not schedule_data:
                         st.info("暂无数据")
                     else:
-                        # ========== HTML 表格 (流程卡片优化版) ==========
                         
                         table_css = """
                         <style>
@@ -1221,12 +1143,10 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                     row_html += f"<td class='slot-column' rowspan='{row_count}'>{item['时段']}</td>"
                                     row_html += f"<td class='duration-column' rowspan='{row_count}'>{item['时长']}</td>"
                                 
-                                # === [核心] 构建流程图 ===
                                 flow_html = '<div class="timeline-container">'
                                 display_items = item.get('display_items', [])
                                 
                                 for idx, d_item in enumerate(display_items):
-                                    # 卡片 HTML
                                     card = f"""
                                     <div class="timeline-card">
                                         <div class="card-header">
@@ -1241,7 +1161,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                     """
                                     flow_html += card
                                     
-                                    # 如果不是最后一个，添加箭头
                                     if idx < len(display_items) - 1:
                                         flow_html += '<div class="arrow-icon">➜</div>'
                                 
@@ -1269,10 +1188,9 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         """
                         st.markdown(full_html, unsafe_allow_html=True)
 
-                    # ========== 3. 统计信息 (保持不变) ==========
+                    # Define the results
                     st.markdown("### 📊 统计信息")
                     df_slot = pd.DataFrame(schedule_data)
-                    # 导出Excel时，要把 display_items 这个辅助字段去掉，防止报错
                     if 'display_items' in df_slot.columns:
                         df_slot = df_slot.drop(columns=['display_items'])
                         
@@ -1285,43 +1203,32 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         unique = df_slot['时段'].nunique() if not df_slot.empty else 0
                         avg = len(df_slot) / unique if unique > 0 else 0
                         st.metric("平均每时段条目", f"{avg:.1f}")
-                                
+                # Export              
                 with tab3:
-                    # 导出为Excel
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        # 获取数据
                         df_class = pd.DataFrame(sol['class_details'])
                         df_slot = pd.DataFrame(sol['slot_schedule'])
                         
-                        # [修复] 剔除只用于网页显示的辅助列 'display_items'
                         if 'display_items' in df_slot.columns:
                             df_slot = df_slot.drop(columns=['display_items'])
                         
-                        # [重要] 确保开班详情按 科目 -> 班级(A,B) 排序
                         df_class = df_class.sort_values(by=['科目', '班级'])
                         
-                        # 1. 写入 "开班详情" Sheet
                         df_class.to_excel(writer, sheet_name='开班详情', index=False)
                         
-                        # 2. 写入 "时段总表" Sheet
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
-                        # 3. 写入 "所有班级及涉及的配套" Sheet
-                        #  - 先复制一份数据
                         df_overview = df_class.copy()
                         
-                        #  - 合并列并去除"班"字：例如 "化学" + "班A" -> "化学A"
                         df_overview['科目 & 班级'] = df_overview['科目'] + df_overview['班级'].str.replace('班', '')
                         
-                        #  - 只保留合并后的列、人数和配套
                         df_overview = df_overview[['科目 & 班级', '学生配套']]
-                        #  - 重命名配套列
                         df_overview.columns = ['科目 SUBJECT', '配套 PACKAGE']
                         
                         df_overview.to_excel(writer, sheet_name='导入', index=False)
                         
-                        # === 自动调整列宽逻辑 ===
+                        # Adjust width
                         workbook = writer.book
                         
                         for sheet_name in writer.sheets:
