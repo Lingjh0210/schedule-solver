@@ -838,7 +838,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
     if 'packages' not in st.session_state:
         st.markdown('<div class="info-box">', unsafe_allow_html=True)
         st.markdown("""
-        ### 智能排课搜索器！
+        ### 智能排课搜索器
         
         **使用步骤：**
         1. 📁 在左侧上传配套数据文件（Excel或CSV格式）
