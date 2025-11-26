@@ -523,10 +523,11 @@ class ScheduleSolver:
     
     def extract_timetable(self, result):
         """
-        提取课表数据（视觉优化适配版）
+        提取课表数据（空缺填补版）
         1. 班级命名：A, B, C...
-        2. 数据结构：除了生成给Excel用的字符串，额外生成 'display_items' 列表，
-           用于在前端绘制 "卡片 -> 箭头 -> 卡片" 的流程效果。
+        2. 时段总表：拼图合并 + 自动填补时间空缺。
+           如果 S9(3h) 的课只排在后两小时，前一小时会自动插入 "0(1h)"。
+           确保时间轴完整，显示为：0(1h) + 历史(1h) + 经济(1h)。
         """
         solver = result['solver']
         u_r = result['variables']['u_r']
@@ -546,7 +547,7 @@ class ScheduleSolver:
             for index, item in enumerate(active_classes):
                 class_name_map[(k, item['r'])] = f"班{chr(65 + index)}"
 
-        # ========== 2. 开班详情 (保持不变) ==========
+        # ========== 2. 开班详情 ==========
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -567,10 +568,14 @@ class ScheduleSolver:
                     })
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 3. 时段总表 (包含 display_items) ==========
+        # ========== 3. 时段总表 (拼图 + 填空) ==========
         slot_schedule_data = []
+        
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
-            group_slots = self.SLOT_GROUPS[group_name]
+            group_slots = self.SLOT_GROUPS[group_name] # e.g. [28, 29, 30]
+            group_slots_set = set(group_slots)
+            
+            # 3.1 收集碎片
             fragments = []
             for k in self.subjects:
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -581,7 +586,7 @@ class ScheduleSolver:
                     if not students: continue
                     
                     fragments.append({
-                        'subject': f"{k}", # 纯科目名
+                        'subject': f"{k}",
                         'duration_str': f"{actual_hours}h",
                         'class_name': class_name_map.get((k, r), f'班{r}'),
                         'packages_str': ', '.join(sorted(students, key=natural_sort_key)),
@@ -589,9 +594,11 @@ class ScheduleSolver:
                         'size': sum(self.packages[p]['人数'] for p in students),
                         'raw_hours': actual_hours,
                         'active_slots': set(active_slots),
-                        'start_time': min(active_slots)
+                        'start_time': min(active_slots),
+                        'is_gap': False # 标记：这是真实课程
                     })
             
+            # 3.2 贪心拼图
             fragments.sort(key=lambda x: -x['size'])
             visual_rows = []
             for frag in fragments:
@@ -605,40 +612,82 @@ class ScheduleSolver:
                         row.append(frag); placed = True; break
                 if not placed: visual_rows.append([frag])
             
+            # 3.3 [核心修改] 填补空缺 (Gap Filling)
             for row_items in visual_rows:
-                # 按时间先后排序
+                # 计算这行已被占用的时间点
+                occupied_slots = set()
+                for item in row_items:
+                    occupied_slots.update(item['active_slots'])
+                
+                # 找出未被占用的时间点
+                missing_slots = sorted(list(group_slots_set - occupied_slots))
+                
+                # 将连续的缺失时间点合并为一个 Gap 片段
+                if missing_slots:
+                    import itertools
+                    # 分组连续数字：[1, 2, 5] -> [[1, 2], [5]]
+                    for _, g in itertools.groupby(enumerate(missing_slots), lambda ix: ix[0] - ix[1]):
+                        gap_group = list(map(lambda ix: ix[1], g))
+                        gap_len = len(gap_group)
+                        
+                        # 添加 Gap 片段
+                        row_items.append({
+                            'subject': '0', # 显示为 0
+                            'duration_str': f"{gap_len}h",
+                            'class_name': '-',
+                            'packages_str': '-',
+                            'raw_packages': [],
+                            'size': 0,
+                            'raw_hours': 0, # 空缺不计入总学时
+                            'active_slots': set(gap_group),
+                            'start_time': min(gap_group),
+                            'is_gap': True # 标记：这是空缺
+                        })
+                
+                # 重新按时间排序，确保 0 在正确的位置
                 row_items.sort(key=lambda x: x['start_time'])
                 
-                # Excel 用的纯文本字符串
+                # 3.4 生成输出字符串
+                # 拼接科目：例如 "0(1h) + 化学(1h)"
                 merged_subject = " + ".join([f"{i['subject']}({i['duration_str']})" for i in row_items])
-                merged_class = " + ".join([f"{i['subject']}{i['class_name']}" for i in row_items])
+                
+                # 拼接班级：空缺显示为"-"，例如 "- + 化学班A"
+                merged_class = " + ".join([
+                    f"{i['subject']}{i['class_name']}" if not i['is_gap'] else "-" 
+                    for i in row_items
+                ])
+                
+                # 拼接配套
                 merged_packages = " + ".join([i['packages_str'] for i in row_items])
                 
-                # 计算去重人数
+                # 计算去重人数 (只计算真实课程)
                 unique_pkgs = set()
                 for i in row_items:
                     for p in i['raw_packages']: unique_pkgs.add(p)
                 unique_count = sum(self.packages[p]['人数'] for p in unique_pkgs)
                 
-                # [关键] 构造 UI 用的数据对象
+                # 构造 UI 用的数据对象
                 display_list = []
                 for idx, item in enumerate(row_items):
                     display_list.append({
-                        'seq': idx + 1, # 序号 1, 2, 3
+                        'seq': idx + 1,
                         'subject': item['subject'],
                         'duration': item['duration_str'],
                         'class': item['class_name'],
-                        'color_seed': item['subject'] # 用于生成随机颜色
+                        'color_seed': item['subject'] if not item['is_gap'] else 'gap', # 空缺卡片用特殊颜色
+                        'is_gap': item['is_gap']
                     })
 
                 slot_schedule_data.append({
                     '时段': group_name,
-                    '时长': f"{sum(i['raw_hours'] for i in row_items)}h",
-                    '科目': merged_subject,   # Excel用
-                    '班级': merged_class,     # Excel用
+                    # 时长显示：真实课时总和 (如果需要显示3h，可改为 len(group_slots))
+                    # 这里保持显示真实课时，比如 "2h" (中间空了1h)
+                    '时长': f"{sum(i['raw_hours'] for i in row_items)}h", 
+                    '科目': merged_subject,
+                    '班级': merged_class,
                     '人数': unique_count,
                     '涉及配套': merged_packages,
-                    'display_items': display_list # [新] 前端渲染用
+                    'display_items': display_list
                 })
         
         return class_details, slot_schedule_data
