@@ -812,8 +812,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 • 两个方案大同小异时，可以增加求解时间
             </div>
             """, unsafe_allow_html=True)
-            
-            default_slots = recommended_slots
         solver_timeout = st.number_input("求解超时(秒)", min_value=10, max_value=600, value=120, step=10)
         
         st.markdown("---")
