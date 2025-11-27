@@ -1228,14 +1228,16 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         st.metric("平均每时段条目", f"{avg:.1f}")
                 # Export              
                 with tab3:
-                    # Excel file
+                    # 导出为Excel
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # 准备数据源
                         raw_class_data = sol['class_details']
                         raw_slot_data = sol['slot_schedule']
                         
                         df_class = pd.DataFrame(raw_class_data)
                         
+                        # [通用函数] 定义合并逻辑
                         def format_subject_class_col(row):
                             suffix = row['班级'].replace('班', '')
                             if suffix:
@@ -1243,17 +1245,21 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             else:
                                 return row['科目']
 
+                        # =========================================================
+                        # 1. 处理 "开班详情" Sheet
+                        # =========================================================
                         df_class = df_class.sort_values(by=['科目', '班级'])
-                        
                         df_class['科目 & 班级'] = df_class.apply(format_subject_class_col, axis=1)
-                        
                         df_class_export = df_class[['科目 & 班级', '人数', '时段', '学生配套']]
-                        
                         df_class_export.to_excel(writer, sheet_name='开班详情', index=False)
                         
                         
+                        # =========================================================
+                        # 2. 处理 "时段总表" Sheet
+                        # =========================================================
                         df_slot = pd.DataFrame(raw_slot_data)
                         
+                        # 准备 3 个新列
                         p1_list, p2_list, p3_list = [], [], []
                         
                         for item in raw_slot_data:
@@ -1266,7 +1272,9 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                     if not pkg_str or sub_item.get('is_gap', False):
                                         pkg_str = "-"
                                     
+                                    # 获取精确槽位
                                     rel_slots = sub_item.get('relative_slots', [])
+                                    # Fallback兼容
                                     if not rel_slots and 'start_offset' in sub_item:
                                         try: dur = int(sub_item['duration'].replace('h',''))
                                         except: dur = 1
@@ -1281,38 +1289,93 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             p2_list.append(current_pkg_slots[1])
                             p3_list.append(current_pkg_slots[2])
                         
+                        # 添加新列
                         df_slot['配套 (第1小时)'] = p1_list
                         df_slot['配套 (第2小时)'] = p2_list
                         df_slot['配套 (第3小时)'] = p3_list
                         
+                        # 剔除无关列
                         drops = ['display_items', 'sort_key_subject', '涉及配套']
                         df_slot = df_slot.drop(columns=[c for c in drops if c in df_slot.columns])
                         
+                        # 调整列顺序
                         base_cols = [c for c in df_slot.columns if '配套' not in c]
                         new_cols = ['配套 (第1小时)', '配套 (第2小时)', '配套 (第3小时)']
                         df_slot = df_slot[base_cols + new_cols]
                         
-                        # Sheet 2
+                        # 写入 Excel
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
+                        # =========================================================
+                        # [核心新增] Excel 单元格合并逻辑 (Merge Cells)
+                        # =========================================================
+                        from openpyxl.styles import Alignment
                         
+                        ws_slot = writer.sheets['时段总表']
+                        # 确定配套列的起始索引 (1-based index)
+                        # 列顺序：时段(1), 时长(2), 科目&班级(3), 人数(4), 配套1(5), 配套2(6), 配套3(7)
+                        col_pkg_start = 5 
+                        
+                        # 遍历每一行数据 (从第2行开始，第1行是表头)
+                        # ws_slot.max_row 可能包含空行，使用 len(df_slot) 更安全
+                        for r_idx in range(2, len(df_slot) + 2):
+                            # 获取三个单元格的值
+                            cell1 = ws_slot.cell(row=r_idx, column=col_pkg_start)
+                            cell2 = ws_slot.cell(row=r_idx, column=col_pkg_start+1)
+                            cell3 = ws_slot.cell(row=r_idx, column=col_pkg_start+2)
+                            
+                            val1 = cell1.value
+                            val2 = cell2.value
+                            val3 = cell3.value
+                            
+                            # 定义居中样式
+                            center_align = Alignment(horizontal='center', vertical='center')
+                            
+                            # 逻辑1: 如果 1,2,3 都相同且不是空杠，合并 1-3
+                            if val1 == val2 == val3 and val1 != '-':
+                                ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start, 
+                                                  end_row=r_idx, end_column=col_pkg_start+2)
+                                cell1.alignment = center_align
+                            
+                            # 逻辑2: 如果只有 1,2 相同 (例如 2h 课程)，合并 1-2
+                            elif val1 == val2 and val1 != '-':
+                                ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start, 
+                                                  end_row=r_idx, end_column=col_pkg_start+1)
+                                cell1.alignment = center_align
+                                # 此时 cell3 单独存在，但也给它居中一下好看
+                                cell3.alignment = center_align
 
-                        # 直接基于处理好的 df_class_export 提取，不用重新做一遍合并
-                        df_overview = df_class_export[['科目 & 班级', '学生配套']].copy()
-                        df_overview.columns = ['科目 SUBJECT', '配套 PACKAGE']
+                            # 逻辑3: 如果只有 2,3 相同 (例如空1h + 2h课程)，合并 2-3
+                            elif val2 == val3 and val2 != '-':
+                                ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start+1, 
+                                                  end_row=r_idx, end_column=col_pkg_start+2)
+                                cell2.alignment = center_align
+                                cell1.alignment = center_align
+                            
+                            else:
+                                # 都不相同，全都单独居中
+                                cell1.alignment = center_align
+                                cell2.alignment = center_align
+                                cell3.alignment = center_align
                         
-                        # Sheet 3
-                        df_overview.to_excel(writer, sheet_name='导入', index=False)
+                        
+                        # =========================================================
+                        # 3. 处理 "所有班级及涉及的配套" Sheet
+                        # =========================================================
+                        df_overview = df_class_export[['科目 & 班级', '人数', '学生配套']].copy()
+                        df_overview.columns = ['科目 & 班级', '人数', '涉及配套']
+                        df_overview.to_excel(writer, sheet_name='所有班级及涉及的配套', index=False)
                         
                         
-
-                        # adjust column width
+                        # =========================================================
+                        # 4. 自动调整列宽
+                        # =========================================================
                         workbook = writer.book
                         for sheet_name in writer.sheets:
                             worksheet = writer.sheets[sheet_name]
                             if sheet_name == '时段总表':
                                 df_to_measure = df_slot
-                            elif sheet_name == '导入':
+                            elif sheet_name == '所有班级及涉及的配套':
                                 df_to_measure = df_overview
                             else:
                                 df_to_measure = df_class_export
