@@ -1398,5 +1398,20 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 df_to_measure = df_overview
                             else:
                                 df_to_measure = df_class_export
+                                
+                            for idx, col in enumerate(df_to_measure.columns):
+                                max_len = max(
+                                    len(str(col)),
+                                    df_to_measure[col].astype(str).str.len().max() if not df_to_measure[col].empty else 0
+                                )
+                                adjusted_width = min(max_len + 4, 60)
+                                worksheet.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
+                    
+                    st.download_button(
+                        label="📥 下载Excel文件",
+                        data=output.getvalue(),
+                        file_name=f"{sol['name'].replace('：', '_')}_排课结果.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 if __name__ == "__main__":
     main()
