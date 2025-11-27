@@ -1011,10 +1011,16 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
     # ... (在 st.subheader("🔧 求解参数") 部分之后) ...
     
     # 实时构建当前配置对象
+    # 实时构建当前配置对象
+    # 务必确保这里包含 check_data_feasibility 函数需要的所有参数
     current_config = {
         'min_class_size': min_class_size,
         'max_class_size': max_class_size,
-        'max_classes_per_subject': max_classes_per_subject
+        'max_classes_per_subject': max_classes_per_subject,
+        'num_slots': num_slots,  # <--- 补上这一行！
+        # 如果你之前加了并发功能，记得把这一行也加上，否则会报 'default_concurrency' 错误
+        'default_concurrency': st.session_state.get('default_concurrency', 1) if 'default_concurrency' in st.session_state else 1
+        # 或者如果你把并发输入框定义为了变量 default_concurrency，则写: 'default_concurrency': default_concurrency
     }
 
     # --- 插入点：实时预检 ---
