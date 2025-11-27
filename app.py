@@ -852,6 +852,45 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.markdown("---")
         
         st.subheader("🔧 求解参数")
+         # ... (在 st.subheader("🔧 求解参数") 部分之后) ...
+    
+        # 实时构建当前配置对象
+        current_config = {
+            'min_class_size': min_class_size,
+            'max_class_size': max_class_size,
+            'max_classes_per_subject': max_classes_per_subject
+        }
+    
+        # --- 插入点：实时预检 ---
+        if 'packages' in st.session_state:
+            feasibility_issues = check_data_feasibility(
+                st.session_state['packages'], 
+                st.session_state['subject_hours'], 
+                current_config
+            )
+            
+            if feasibility_issues:
+                st.markdown('<div class="error-box">', unsafe_allow_html=True)
+                st.error(f"⚠️ 检测到 {len(feasibility_issues)} 个科目存在数学逻辑冲突（必无解）：")
+                
+                for issue in feasibility_issues:
+                    st.markdown(f"""
+                    **❌ {issue['subject']}**: {issue['reason']}
+                    * <small style="color: #666;">建议: {issue['suggestion']}</small>
+                    """, unsafe_allow_html=True)
+                
+                st.warning("💡 请调整上方的【最小班额】、【最大班额】或【每科目最大班数】，直到此错误框消失。")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                # 可选：如果存在致命错误，禁用求解按钮
+                disable_solve = True
+            else:
+                st.success("✅ 数据校验通过：所有科目的总人数均在合法区间内。")
+                disable_solve = False
+        else:
+            disable_solve = True
+    
+        st.markdown("---")
         
         min_class_size = st.number_input("最小班额", min_value=1, max_value=100, value=5, step=1)
         max_class_size = st.number_input("最大班额", min_value=1, max_value=200, value=60, step=1)
@@ -974,45 +1013,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         ])
         st.dataframe(df_enrollment, use_container_width=True)
     
-    st.markdown("---")
-    # ... (在 st.subheader("🔧 求解参数") 部分之后) ...
-    
-    # 实时构建当前配置对象
-    current_config = {
-        'min_class_size': min_class_size,
-        'max_class_size': max_class_size,
-        'max_classes_per_subject': max_classes_per_subject
-    }
-
-    # --- 插入点：实时预检 ---
-    if 'packages' in st.session_state:
-        feasibility_issues = check_data_feasibility(
-            st.session_state['packages'], 
-            st.session_state['subject_hours'], 
-            current_config
-        )
-        
-        if feasibility_issues:
-            st.markdown('<div class="error-box">', unsafe_allow_html=True)
-            st.error(f"⚠️ 检测到 {len(feasibility_issues)} 个科目存在数学逻辑冲突（必无解）：")
-            
-            for issue in feasibility_issues:
-                st.markdown(f"""
-                **❌ {issue['subject']}**: {issue['reason']}
-                * <small style="color: #666;">建议: {issue['suggestion']}</small>
-                """, unsafe_allow_html=True)
-            
-            st.warning("💡 请调整上方的【最小班额】、【最大班额】或【每科目最大班数】，直到此错误框消失。")
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # 可选：如果存在致命错误，禁用求解按钮
-            disable_solve = True
-        else:
-            st.success("✅ 数据校验通过：所有科目的总人数均在合法区间内。")
-            disable_solve = False
-    else:
-        disable_solve = True
-
     st.markdown("---")
 
     # Solving button (修改原来的 button 代码)
