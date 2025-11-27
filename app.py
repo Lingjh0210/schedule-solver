@@ -1274,7 +1274,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                     
                                     # 获取精确槽位
                                     rel_slots = sub_item.get('relative_slots', [])
-                                    # Fallback兼容
+                                    # Fallback
                                     if not rel_slots and 'start_offset' in sub_item:
                                         try: dur = int(sub_item['duration'].replace('h',''))
                                         except: dur = 1
@@ -1307,57 +1307,80 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
                         # =========================================================
-                        # [核心新增] Excel 单元格合并逻辑 (Merge Cells)
+                        # [核心修改] Excel 样式处理：
+                        # 1. 配套列横向合并
+                        # 2. 时段列/时长列 纵向合并 (S1, S2...)
+                        # 3. 粗边框 Outline
                         # =========================================================
-                        from openpyxl.styles import Alignment
+                        from openpyxl.styles import Alignment, Border, Side
                         
                         ws_slot = writer.sheets['时段总表']
-                        # 确定配套列的起始索引 (1-based index)
-                        # 列顺序：时段(1), 时长(2), 科目&班级(3), 人数(4), 配套1(5), 配套2(6), 配套3(7)
                         col_pkg_start = 5 
                         
-                        # 遍历每一行数据 (从第2行开始，第1行是表头)
-                        # ws_slot.max_row 可能包含空行，使用 len(df_slot) 更安全
-                        for r_idx in range(2, len(df_slot) + 2):
-                            # 获取三个单元格的值
+                        # 样式定义
+                        thick_border = Border(bottom=Side(style='thick', color='000000'))
+                        thin_border = Border(bottom=Side(style='thin', color='D3D3D3'))
+                        center_align = Alignment(horizontal='center', vertical='center')
+                        
+                        max_row = len(df_slot) + 1 
+                        
+                        # [新增] 记录当前时段分组的起始行 (初始化为第2行，即数据第一行)
+                        slot_merge_start = 2
+                        
+                        for r_idx in range(2, max_row + 2):
+                            # --- A. 配套列横向合并逻辑 ---
                             cell1 = ws_slot.cell(row=r_idx, column=col_pkg_start)
                             cell2 = ws_slot.cell(row=r_idx, column=col_pkg_start+1)
                             cell3 = ws_slot.cell(row=r_idx, column=col_pkg_start+2)
                             
-                            val1 = cell1.value
-                            val2 = cell2.value
-                            val3 = cell3.value
+                            val1, val2, val3 = cell1.value, cell2.value, cell3.value
                             
-                            # 定义居中样式
-                            center_align = Alignment(horizontal='center', vertical='center')
-                            
-                            # 逻辑1: 如果 1,2,3 都相同且不是空杠，合并 1-3
                             if val1 == val2 == val3 and val1 != '-':
-                                ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start, 
-                                                  end_row=r_idx, end_column=col_pkg_start+2)
+                                ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start, end_row=r_idx, end_column=col_pkg_start+2)
                                 cell1.alignment = center_align
-                            
-                            # 逻辑2: 如果只有 1,2 相同 (例如 2h 课程)，合并 1-2
                             elif val1 == val2 and val1 != '-':
-                                ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start, 
-                                                  end_row=r_idx, end_column=col_pkg_start+1)
+                                ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start, end_row=r_idx, end_column=col_pkg_start+1)
                                 cell1.alignment = center_align
-                                # 此时 cell3 单独存在，但也给它居中一下好看
                                 cell3.alignment = center_align
-
-                            # 逻辑3: 如果只有 2,3 相同 (例如空1h + 2h课程)，合并 2-3
                             elif val2 == val3 and val2 != '-':
-                                ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start+1, 
-                                                  end_row=r_idx, end_column=col_pkg_start+2)
+                                ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start+1, end_row=r_idx, end_column=col_pkg_start+2)
                                 cell2.alignment = center_align
                                 cell1.alignment = center_align
-                            
                             else:
-                                # 都不相同，全都单独居中
                                 cell1.alignment = center_align
                                 cell2.alignment = center_align
                                 cell3.alignment = center_align
-                        
+                            
+                            # --- B. 分组判断逻辑 ---
+                            # 获取当前行和下一行的时段名称
+                            current_slot = ws_slot.cell(row=r_idx, column=1).value
+                            next_slot = None
+                            if r_idx < max_row + 1:
+                                next_slot = ws_slot.cell(row=r_idx+1, column=1).value
+                            
+                            # 如果到达分组边界 (当前行是该组最后一行)
+                            if current_slot != next_slot:
+                                # 1. 画粗底边 (Outline)
+                                for c_idx in range(1, 8):
+                                    ws_slot.cell(row=r_idx, column=c_idx).border = thick_border
+                                
+                                # 2. [核心新增] 纵向合并时段列 (S1...) 和 时长列 (2h...)
+                                # 如果起始行 < 当前行，说明有多行，需要合并
+                                # 即使只有一行，执行 merge 也没副作用，或者加上 if r_idx > slot_merge_start 判断
+                                ws_slot.merge_cells(start_row=slot_merge_start, start_column=1, end_row=r_idx, end_column=1) # 合并时段
+                                ws_slot.merge_cells(start_row=slot_merge_start, start_column=2, end_row=r_idx, end_column=2) # 合并时长
+                                
+                                # 设置居中对齐 (必须设置在左上角单元格)
+                                ws_slot.cell(row=slot_merge_start, column=1).alignment = center_align
+                                ws_slot.cell(row=slot_merge_start, column=2).alignment = center_align
+                                
+                                # 更新下一组的起始行
+                                slot_merge_start = r_idx + 1
+                            else:
+                                # 组内画浅色线
+                                for c_idx in range(1, 8):
+                                    ws_slot.cell(row=r_idx, column=c_idx).border = thin_border
+
                         
                         # =========================================================
                         # 3. 处理 "所有班级及涉及的配套" Sheet
