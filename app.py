@@ -717,51 +717,83 @@ class ScheduleSolver:
         
 def check_data_feasibility(packages, subject_hours, config):
     """
-    预检数据可行性，提前发现数学上无解的情况
+    全方位预检：人数容量 + 教师资源 + 学生负荷
     """
-    enrollment = calculate_subject_enrollment(packages)
     issues = []
     
+    # 基础配置获取
     min_s = config['min_class_size']
     max_s = config['max_class_size']
     max_k = config['max_classes_per_subject']
+    num_slots = config['num_slots']
     
+    # 计算系统总容量（小时数）
+    # 前 num_slots-1 个组是2小时，最后一个是3小时
+    total_system_hours = (num_slots - 1) * 2 + 3
+    
+    # 获取并发限制 (如果你还没加并发功能，这里默认为1)
+    # 如果你加了 'default_concurrency'，请在这里读取 config['default_concurrency']
+    concurrency_limit = config.get('default_concurrency', 1) 
+
+    enrollment = calculate_subject_enrollment(packages)
+    
+    # ==========================================
+    # 1. 检查人数容量 (之前的逻辑)
+    # ==========================================
     for subject, total_students in enrollment.items():
-        is_feasible = False
-        valid_ranges = []
+        is_capacity_feasible = False
+        min_classes_needed = 0
         
-        # 遍历所有可能的开班数 (1 到 max_classes)
-        # 看看是否存在某种开班数量 r，使得总人数 N 落在 [r*min, r*max] 之间
         for r in range(1, max_k + 1):
-            capacity_min = r * min_s
-            capacity_max = r * max_s
-            
-            if capacity_min <= total_students <= capacity_max:
-                is_feasible = True
+            if r * min_s <= total_students <= r * max_s:
+                is_capacity_feasible = True
+                min_classes_needed = r # 记录最少需要开几个班
                 break
-            
-            valid_ranges.append(f"{r}个班({capacity_min}-{capacity_max}人)")
-            
-        if not is_feasible:
-            # 分析具体原因
-            reason = ""
-            max_capacity = max_k * max_s
-            
-            if total_students < min_s:
-                reason = f"人数过少 (只有{total_students}人)，不足以开设最小班额({min_s}人)"
-            elif total_students > max_capacity:
-                reason = f"人数过多 ({total_students}人)，超过最大容量限额({max_capacity}人)"
-            else:
-                # 命中“断层”陷阱
-                reason = f"人数({total_students}人) 落在了尴尬的区间，无法被分配。"
-                
+        
+        if not is_capacity_feasible:
             issues.append({
+                'type': '人数容量',
                 'subject': subject,
-                'students': total_students,
-                'reason': reason,
-                'suggestion': f"该科目可能的合法总人数区间: {'; '.join(valid_ranges[:3])}..."
+                'detail': f"人数({total_students})无法被分配到1-{max_k}个班级中(班额{min_s}-{max_s})。",
+                'suggestion': "调整班额限制或最大班数。"
             })
-            
+            continue # 人数都排不下，后面不用算了
+
+        # ==========================================
+        # 2. [新增] 检查教师/教室资源瓶颈
+        # ==========================================
+        # 该科目单班时长
+        hours_per_class = subject_hours.get(subject, 0)
+        # 该科目总共需要的“人次·小时”
+        # 假设最少开 min_classes_needed 个班，那么总共需要占用时间片：
+        total_slots_needed = min_classes_needed * hours_per_class
+        
+        # 能够提供的最大时间片 = 总时长 * 并发数
+        max_slots_available = total_system_hours * concurrency_limit
+        
+        if total_slots_needed > max_slots_available:
+            issues.append({
+                'type': '资源瓶颈',
+                'subject': subject,
+                'detail': f"需要排 {min_classes_needed} 个班 × {hours_per_class}小时 = {total_slots_needed} 小时，但系统只有 {total_system_hours} 小时可用(并发={concurrency_limit})。",
+                'suggestion': f"增加【时段组数量】，或者允许【{subject}】多班并发上课。"
+            })
+
+    # ==========================================
+    # 3. [新增] 检查学生负荷过载
+    # ==========================================
+    for pkg_name, pkg_data in packages.items():
+        # 计算该配套的总课时
+        total_pkg_hours = sum(pkg_data['科目'].values())
+        
+        if total_pkg_hours > total_system_hours:
+            issues.append({
+                'type': '学生负荷',
+                'subject': pkg_name, # 这里借用字段显示配套名
+                'detail': f"该配套学生需要上课 {total_pkg_hours} 小时，但排课总时长只有 {total_system_hours} 小时。",
+                'suggestion': "增加【时段组数量】或减少该配套科目。"
+            })
+
     return issues
     
 # main design
