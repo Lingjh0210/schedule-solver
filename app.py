@@ -257,7 +257,7 @@ class ScheduleSolver:
                     u_pkr[(p, k, r)] = model.NewBoolVar(f'u_{p}_{k}_{r}')
                     for t in self.TIME_SLOTS_1H:
                         x_prt[(p, k, r, t)] = model.NewBoolVar(f'x_{p}_{k}_{r}_{t}')
-       # ==============================================================================
+        # ==============================================================================
         # [优化] 打破对称性 (Symmetry Breaking)
         # ==============================================================================
         
@@ -286,7 +286,7 @@ class ScheduleSolver:
                 # 添加约束：后一个班的人数必须小于等于前一个班
                 model.Add(size_curr <= size_prev)
                 
-        # ============================================================================== 
+        # ==============================================================================
         for k in self.subjects:
             H_k = self.subject_hours[k]
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -763,6 +763,7 @@ def check_data_feasibility(packages, subject_hours, config):
             })
             
     return issues
+    
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
@@ -852,45 +853,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.markdown("---")
         
         st.subheader("🔧 求解参数")
-         # ... (在 st.subheader("🔧 求解参数") 部分之后) ...
-    
-        # 实时构建当前配置对象
-        current_config = {
-            'min_class_size': min_class_size,
-            'max_class_size': max_class_size,
-            'max_classes_per_subject': max_classes_per_subject
-        }
-    
-        # --- 插入点：实时预检 ---
-        if 'packages' in st.session_state:
-            feasibility_issues = check_data_feasibility(
-                st.session_state['packages'], 
-                st.session_state['subject_hours'], 
-                current_config
-            )
-            
-            if feasibility_issues:
-                st.markdown('<div class="error-box">', unsafe_allow_html=True)
-                st.error(f"⚠️ 检测到 {len(feasibility_issues)} 个科目存在数学逻辑冲突（必无解）：")
-                
-                for issue in feasibility_issues:
-                    st.markdown(f"""
-                    **❌ {issue['subject']}**: {issue['reason']}
-                    * <small style="color: #666;">建议: {issue['suggestion']}</small>
-                    """, unsafe_allow_html=True)
-                
-                st.warning("💡 请调整上方的【最小班额】、【最大班额】或【每科目最大班数】，直到此错误框消失。")
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # 可选：如果存在致命错误，禁用求解按钮
-                disable_solve = True
-            else:
-                st.success("✅ 数据校验通过：所有科目的总人数均在合法区间内。")
-                disable_solve = False
-        else:
-            disable_solve = True
-    
-        st.markdown("---")
         
         min_class_size = st.number_input("最小班额", min_value=1, max_value=100, value=5, step=1)
         max_class_size = st.number_input("最大班额", min_value=1, max_value=200, value=60, step=1)
@@ -1014,10 +976,49 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.dataframe(df_enrollment, use_container_width=True)
     
     st.markdown("---")
+    # ... (在 st.subheader("🔧 求解参数") 部分之后) ...
+    
+    # 实时构建当前配置对象
+    current_config = {
+        'min_class_size': min_class_size,
+        'max_class_size': max_class_size,
+        'max_classes_per_subject': max_classes_per_subject
+    }
 
+    # --- 插入点：实时预检 ---
+    if 'packages' in st.session_state:
+        feasibility_issues = check_data_feasibility(
+            st.session_state['packages'], 
+            st.session_state['subject_hours'], 
+            current_config
+        )
+        
+        if feasibility_issues:
+            st.markdown('<div class="error-box">', unsafe_allow_html=True)
+            st.error(f"⚠️ 检测到 {len(feasibility_issues)} 个科目存在数学逻辑冲突（必无解）：")
+            
+            for issue in feasibility_issues:
+                st.markdown(f"""
+                **❌ {issue['subject']}**: {issue['reason']}
+                * <small style="color: #666;">建议: {issue['suggestion']}</small>
+                """, unsafe_allow_html=True)
+            
+            st.warning("💡 请调整上方的【最小班额】、【最大班额】或【每科目最大班数】，直到此错误框消失。")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # 可选：如果存在致命错误，禁用求解按钮
+            disable_solve = True
+        else:
+            st.success("✅ 数据校验通过：所有科目的总人数均在合法区间内。")
+            disable_solve = False
+    else:
+        disable_solve = True
+
+    st.markdown("---")
+    # Solving button
     st.markdown('<div class="sub-header">🚀 开始求解</div>', unsafe_allow_html=True)
     
-    if st.button("🎯 生成排课方案", type="primary", use_container_width=True):
+    if st.button("🎯 生成排课方案", type="primary", use_container_width=True, disabled=disable_solve):
         config = {
             'min_class_size': min_class_size,
             'max_class_size': max_class_size,
