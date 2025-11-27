@@ -1324,7 +1324,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         
                         df_overview = df_overview[['科目 & 班级', '学生配套']]
                         df_overview.columns = ['科目 & 班级', '涉及配套']
-                        导入', index=False)
+                        df_overview.to_excel(writer, sheet_name='导入', index=False)
                         
                         # === 自动调整列宽 ===
                         workbook = writer.book
