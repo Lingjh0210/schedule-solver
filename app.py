@@ -715,54 +715,54 @@ class ScheduleSolver:
 
         return class_details, slot_schedule_data
         
-    def check_data_feasibility(packages, subject_hours, config):
-    """
-    预检数据可行性，提前发现数学上无解的情况
-    """
-    enrollment = calculate_subject_enrollment(packages)
-    issues = []
-    
-    min_s = config['min_class_size']
-    max_s = config['max_class_size']
-    max_k = config['max_classes_per_subject']
-    
-    for subject, total_students in enrollment.items():
-        is_feasible = False
-        valid_ranges = []
+        def check_data_feasibility(packages, subject_hours, config):
+        """
+        预检数据可行性，提前发现数学上无解的情况
+        """
+        enrollment = calculate_subject_enrollment(packages)
+        issues = []
         
-        # 遍历所有可能的开班数 (1 到 max_classes)
-        # 看看是否存在某种开班数量 r，使得总人数 N 落在 [r*min, r*max] 之间
-        for r in range(1, max_k + 1):
-            capacity_min = r * min_s
-            capacity_max = r * max_s
+        min_s = config['min_class_size']
+        max_s = config['max_class_size']
+        max_k = config['max_classes_per_subject']
+        
+        for subject, total_students in enrollment.items():
+            is_feasible = False
+            valid_ranges = []
             
-            if capacity_min <= total_students <= capacity_max:
-                is_feasible = True
-                break
-            
-            valid_ranges.append(f"{r}个班({capacity_min}-{capacity_max}人)")
-            
-        if not is_feasible:
-            # 分析具体原因
-            reason = ""
-            max_capacity = max_k * max_s
-            
-            if total_students < min_s:
-                reason = f"人数过少 (只有{total_students}人)，不足以开设最小班额({min_s}人)"
-            elif total_students > max_capacity:
-                reason = f"人数过多 ({total_students}人)，超过最大容量限额({max_capacity}人)"
-            else:
-                # 命中“断层”陷阱
-                reason = f"人数({total_students}人) 落在了尴尬的区间，无法被分配。"
+            # 遍历所有可能的开班数 (1 到 max_classes)
+            # 看看是否存在某种开班数量 r，使得总人数 N 落在 [r*min, r*max] 之间
+            for r in range(1, max_k + 1):
+                capacity_min = r * min_s
+                capacity_max = r * max_s
                 
-            issues.append({
-                'subject': subject,
-                'students': total_students,
-                'reason': reason,
-                'suggestion': f"该科目可能的合法总人数区间: {'; '.join(valid_ranges[:3])}..."
-            })
-            
-    return issues
+                if capacity_min <= total_students <= capacity_max:
+                    is_feasible = True
+                    break
+                
+                valid_ranges.append(f"{r}个班({capacity_min}-{capacity_max}人)")
+                
+            if not is_feasible:
+                # 分析具体原因
+                reason = ""
+                max_capacity = max_k * max_s
+                
+                if total_students < min_s:
+                    reason = f"人数过少 (只有{total_students}人)，不足以开设最小班额({min_s}人)"
+                elif total_students > max_capacity:
+                    reason = f"人数过多 ({total_students}人)，超过最大容量限额({max_capacity}人)"
+                else:
+                    # 命中“断层”陷阱
+                    reason = f"人数({total_students}人) 落在了尴尬的区间，无法被分配。"
+                    
+                issues.append({
+                    'subject': subject,
+                    'students': total_students,
+                    'reason': reason,
+                    'suggestion': f"该科目可能的合法总人数区间: {'; '.join(valid_ranges[:3])}..."
+                })
+                
+        return issues
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
