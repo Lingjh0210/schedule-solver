@@ -1036,8 +1036,13 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             st.error(f"⚠️ 检测到 {len(feasibility_issues)} 个科目存在数学逻辑冲突（必无解）：")
             
             for issue in feasibility_issues:
+                # 获取错误类型（如果有的话，兼容旧版）
+                error_type = issue.get('type', '错误')
+                # 获取详细信息（新版叫 detail，旧版叫 reason，做个兼容防止报错）
+                detail = issue.get('detail', issue.get('reason', '未知原因'))
+                
                 st.markdown(f"""
-                **❌ {issue['subject']}**: {issue['reason']}
+                **❌ [{error_type}] {issue['subject']}**: {detail}
                 * <small style="color: #666;">建议: {issue['suggestion']}</small>
                 """, unsafe_allow_html=True)
             
