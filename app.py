@@ -160,8 +160,8 @@ def parse_uploaded_file(uploaded_file):
                     - 将所有配套的'{subject}'课时改为相同值（如都改为6小时或都改为4小时）
                     
                     **方案2：分离科目**
-                    - 将4小时的会计命名为"会计基础"
-                    - 将6小时的会计命名为"会计进阶"
+                    - 将4小时的会计命名为"会计1"
+                    - 将6小时的会计命名为"会计2"
                     - 这样系统会将它们视为不同科目
                     """)
                     return None, None, None
@@ -1237,59 +1237,78 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         st.metric("平均每时段条目", f"{avg:.1f}")
                 # Export              
                 with tab3:
+                    # 导出为Excel
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # 获取数据
                         df_class = pd.DataFrame(sol['class_details'])
                         df_slot = pd.DataFrame(sol['slot_schedule'])
                         
-                        if 'display_items' in df_slot.columns:
-                            df_slot = df_slot.drop(columns=['display_items'])
+                        # ========== [核心修改] 处理时段总表：配套分列 ==========
+                        # 我们需要解析 display_items，生成 3 个独立的配套列
                         
+                        # 准备 3 个新列的数据列表
+                        p1_list, p2_list, p3_list = [], [], []
+                        
+                        for _, row in df_slot.iterrows():
+                            # 初始化 3 个槽位
+                            current_pkg_slots = ["-", "-", "-"]
+                            
+                            # 获取前端显示用的元数据
+                            d_items = row.get('display_items', [])
+                            if isinstance(d_items, list):
+                                for item in d_items:
+                                    # 获取配套文字
+                                    pkg_str = item.get('packages_str', '-')
+                                    if not pkg_str or item.get('is_gap', False):
+                                        pkg_str = "-"
+                                    
+                                    # 获取精确的槽位索引 [0, 1, 2]
+                                    rel_slots = item.get('relative_slots', [])
+                                    
+                                    # 兼容性 fallback (防止旧数据报错)
+                                    if not rel_slots and 'start_offset' in item:
+                                        try:
+                                            dur = int(item['duration'].replace('h',''))
+                                        except: dur = 1
+                                        start = item['start_offset']
+                                        rel_slots = range(start, start + dur)
+                                    
+                                    # 填充槽位
+                                    for idx in rel_slots:
+                                        if 0 <= idx < 3:
+                                            current_pkg_slots[idx] = pkg_str
+                            
+                            p1_list.append(current_pkg_slots[0])
+                            p2_list.append(current_pkg_slots[1])
+                            p3_list.append(current_pkg_slots[2])
+                        
+                        # 将新列加入 DataFrame
+                        df_slot['配套 (第1小时)'] = p1_list
+                        df_slot['配套 (第2小时)'] = p2_list
+                        df_slot['配套 (第3小时)'] = p3_list
+                        
+                        # 剔除不需要的辅助列和旧的合并列
+                        cols_to_drop = ['display_items', 'sort_key_subject', '涉及配套'] # 删掉旧的'涉及配套'
+                        df_slot = df_slot.drop(columns=[c for c in cols_to_drop if c in df_slot.columns])
+                        
+                        # 调整列顺序 (把配套放到最后)
+                        # 先获取所有列名，然后重新排列
+                        base_cols = [c for c in df_slot.columns if '配套' not in c]
+                        new_pkg_cols = ['配套 (第1小时)', '配套 (第2小时)', '配套 (第3小时)']
+                        df_slot = df_slot[base_cols + new_pkg_cols]
+                        
+                        # ===================================================
+                        
+                        # [开班详情] 排序
                         df_class = df_class.sort_values(by=['科目', '班级'])
                         
+                        # 1. 写入 "开班详情" Sheet
                         df_class.to_excel(writer, sheet_name='开班详情', index=False)
                         
+                        # 2. 写入 "时段总表" Sheet
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
-                        df_overview = df_class.copy()
-                        
-                        def format_subject_class(row):
-                            suffix = row['班级'].replace('班', '')
-                            if suffix:
-                                return f"{row['科目']} {suffix}"
-                            else:
-                                return row['科目']
-
-                        df_overview['科目 & 班级'] = df_overview.apply(format_subject_class, axis=1)
-                        
-                        df_overview = df_overview[['科目 & 班级', '学生配套']]
-                        df_overview.columns = ['科目 SUBJECT', '配套 PACKAGE']
-                        
-                        df_overview.to_excel(writer, sheet_name='导入', index=False)
-                        
-                        workbook = writer.book
-                        for sheet_name in writer.sheets:
-                            worksheet = writer.sheets[sheet_name]
-                            if sheet_name == '时段总表':
-                                df_to_measure = df_slot
-                            elif sheet_name == '导入':
-                                df_to_measure = df_overview
-                            else:
-                                df_to_measure = df_class
-                                
-                            for idx, col in enumerate(df_to_measure.columns):
-                                max_len = max(
-                                    len(str(col)),
-                                    df_to_measure[col].astype(str).str.len().max() if not df_to_measure[col].empty else 0
-                                )
-                                adjusted_width = min(max_len + 4, 60)
-                                worksheet.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
-                    
-                    st.download_button(
-                        label="📥 下载Excel文件",
-                        data=output.getvalue(),
-                        file_name=f"{sol['name'].replace('：', '_')}_排课结果.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                        # 3. 写入 "所有班级及涉及的配套" Sheet
 if __name__ == "__main__":
     main()
