@@ -1310,5 +1310,47 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
                         # 3. 写入 "所有班级及涉及的配套" Sheet
+                        df_overview = df_class.copy()
+                        
+                        # 定义合并逻辑函数：处理空格和空后缀
+                        def format_subject_class(row):
+                            suffix = row['班级'].replace('班', '')
+                            if suffix:
+                                return f"{row['科目']} {suffix}"
+                            else:
+                                return row['科目']
+
+                        df_overview['科目 & 班级'] = df_overview.apply(format_subject_class, axis=1)
+                        
+                        df_overview = df_overview[['科目 & 班级', '人数', '学生配套']]
+                        df_overview.columns = ['科目 & 班级', '人数', '涉及配套']
+                        
+                        df_overview.to_excel(writer, sheet_name='所有班级及涉及的配套', index=False)
+                        
+                        # === 自动调整列宽 ===
+                        workbook = writer.book
+                        for sheet_name in writer.sheets:
+                            worksheet = writer.sheets[sheet_name]
+                            if sheet_name == '时段总表':
+                                df_to_measure = df_slot
+                            elif sheet_name == '所有班级及涉及的配套':
+                                df_to_measure = df_overview
+                            else:
+                                df_to_measure = df_class
+                                
+                            for idx, col in enumerate(df_to_measure.columns):
+                                max_len = max(
+                                    len(str(col)),
+                                    df_to_measure[col].astype(str).str.len().max() if not df_to_measure[col].empty else 0
+                                )
+                                adjusted_width = min(max_len + 4, 60)
+                                worksheet.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
+                    
+                    st.download_button(
+                        label="📥 下载Excel文件",
+                        data=output.getvalue(),
+                        file_name=f"{sol['name'].replace('：', '_')}_排课结果.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 if __name__ == "__main__":
     main()
