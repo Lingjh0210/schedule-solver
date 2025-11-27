@@ -257,7 +257,36 @@ class ScheduleSolver:
                     u_pkr[(p, k, r)] = model.NewBoolVar(f'u_{p}_{k}_{r}')
                     for t in self.TIME_SLOTS_1H:
                         x_prt[(p, k, r, t)] = model.NewBoolVar(f'x_{p}_{k}_{r}_{t}')
+       # ==============================================================================
+        # [优化] 打破对称性 (Symmetry Breaking)
+        # ==============================================================================
         
+        # 1. 强制按顺序开班：只有当第 r-1 个班开启时，第 r 个班才能开启
+        # 防止出现：班1关闭，但班2开启的情况
+        for k in self.subjects:
+            for r in range(2, self.config['max_classes_per_subject'] + 1):
+                model.Add(u_r[(k, r)] <= u_r[(k, r - 1)])
+
+        # 2. 强制班级人数降序排列：班 r 的人数 <= 班 r-1 的人数
+        # 消除“学生互换班级”造成的等价解
+        # 注意：这不会影响“均衡班额”的目标，因为 20,20,20 依然满足 >= 关系
+        for k in self.subjects:
+            for r in range(2, self.config['max_classes_per_subject'] + 1):
+                # 计算第 r 班的人数
+                size_curr = sum(
+                    self.packages[p]['人数'] * u_pkr[(p, k, r)] 
+                    for p in self.package_names
+                )
+                # 计算第 r-1 班的人数
+                size_prev = sum(
+                    self.packages[p]['人数'] * u_pkr[(p, k, r - 1)] 
+                    for p in self.package_names
+                )
+                
+                # 添加约束：后一个班的人数必须小于等于前一个班
+                model.Add(size_curr <= size_prev)
+                
+        # ============================================================================== 
         for k in self.subjects:
             H_k = self.subject_hours[k]
             for r in range(1, self.config['max_classes_per_subject'] + 1):
