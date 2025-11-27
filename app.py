@@ -714,7 +714,55 @@ class ScheduleSolver:
         slot_schedule_data.sort(key=lambda x: (natural_sort_key(x['时段']), x['sort_key_subject']))
 
         return class_details, slot_schedule_data
-
+        
+    def check_data_feasibility(packages, subject_hours, config):
+    """
+    预检数据可行性，提前发现数学上无解的情况
+    """
+    enrollment = calculate_subject_enrollment(packages)
+    issues = []
+    
+    min_s = config['min_class_size']
+    max_s = config['max_class_size']
+    max_k = config['max_classes_per_subject']
+    
+    for subject, total_students in enrollment.items():
+        is_feasible = False
+        valid_ranges = []
+        
+        # 遍历所有可能的开班数 (1 到 max_classes)
+        # 看看是否存在某种开班数量 r，使得总人数 N 落在 [r*min, r*max] 之间
+        for r in range(1, max_k + 1):
+            capacity_min = r * min_s
+            capacity_max = r * max_s
+            
+            if capacity_min <= total_students <= capacity_max:
+                is_feasible = True
+                break
+            
+            valid_ranges.append(f"{r}个班({capacity_min}-{capacity_max}人)")
+            
+        if not is_feasible:
+            # 分析具体原因
+            reason = ""
+            max_capacity = max_k * max_s
+            
+            if total_students < min_s:
+                reason = f"人数过少 (只有{total_students}人)，不足以开设最小班额({min_s}人)"
+            elif total_students > max_capacity:
+                reason = f"人数过多 ({total_students}人)，超过最大容量限额({max_capacity}人)"
+            else:
+                # 命中“断层”陷阱
+                reason = f"人数({total_students}人) 落在了尴尬的区间，无法被分配。"
+                
+            issues.append({
+                'subject': subject,
+                'students': total_students,
+                'reason': reason,
+                'suggestion': f"该科目可能的合法总人数区间: {'; '.join(valid_ranges[:3])}..."
+            })
+            
+    return issues
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
@@ -927,7 +975,50 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.dataframe(df_enrollment, use_container_width=True)
     
     st.markdown("---")
+    # ... (在 st.subheader("🔧 求解参数") 部分之后) ...
     
+    # 实时构建当前配置对象
+    current_config = {
+        'min_class_size': min_class_size,
+        'max_class_size': max_class_size,
+        'max_classes_per_subject': max_classes_per_subject
+    }
+
+    # --- 插入点：实时预检 ---
+    if 'packages' in st.session_state:
+        feasibility_issues = check_data_feasibility(
+            st.session_state['packages'], 
+            st.session_state['subject_hours'], 
+            current_config
+        )
+        
+        if feasibility_issues:
+            st.markdown('<div class="error-box">', unsafe_allow_html=True)
+            st.error(f"⚠️ 检测到 {len(feasibility_issues)} 个科目存在数学逻辑冲突（必无解）：")
+            
+            for issue in feasibility_issues:
+                st.markdown(f"""
+                **❌ {issue['subject']}**: {issue['reason']}
+                * <small style="color: #666;">建议: {issue['suggestion']}</small>
+                """, unsafe_allow_html=True)
+            
+            st.warning("💡 请调整上方的【最小班额】、【最大班额】或【每科目最大班数】，直到此错误框消失。")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # 可选：如果存在致命错误，禁用求解按钮
+            disable_solve = True
+        else:
+            st.success("✅ 数据校验通过：所有科目的总人数均在合法区间内。")
+            disable_solve = False
+    else:
+        disable_solve = True
+
+    st.markdown("---")
+
+    # Solving button (修改原来的 button 代码)
+    # disabled=disable_solve 可以防止用户在必无解的情况下浪费时间
+    if st.button("🎯 生成排课方案", type="primary", use_container_width=True, disabled=disable_solve):
+        # ... (原来的求解逻辑保持不变) ...
     # Solving button
     st.markdown('<div class="sub-header">🚀 开始求解</div>', unsafe_allow_html=True)
     
