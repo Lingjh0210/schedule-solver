@@ -1307,10 +1307,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
                         # =========================================================
-                        # [核心修改] Excel 样式处理：
-                        # 1. 配套列横向合并
-                        # 2. 时段列/时长列 纵向合并 (S1, S2...)
-                        # 3. 粗边框 Outline
+                        # [核心修复] Excel 样式处理：先合并，后画线
                         # =========================================================
                         from openpyxl.styles import Alignment, Border, Side
                         
@@ -1323,8 +1320,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         center_align = Alignment(horizontal='center', vertical='center')
                         
                         max_row = len(df_slot) + 1 
-                        
-                        # [新增] 记录当前时段分组的起始行 (初始化为第2行，即数据第一行)
                         slot_merge_start = 2
                         
                         for r_idx in range(2, max_row + 2):
@@ -1352,29 +1347,30 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 cell3.alignment = center_align
                             
                             # --- B. 分组判断逻辑 ---
-                            # 获取当前行和下一行的时段名称
                             current_slot = ws_slot.cell(row=r_idx, column=1).value
                             next_slot = None
                             if r_idx < max_row + 1:
                                 next_slot = ws_slot.cell(row=r_idx+1, column=1).value
                             
-                            # 如果到达分组边界 (当前行是该组最后一行)
+                            # 如果到达分组边界
                             if current_slot != next_slot:
-                                # 1. 画粗底边 (Outline)
-                                for c_idx in range(1, 8):
-                                    ws_slot.cell(row=r_idx, column=c_idx).border = thick_border
+                                # 1. [先] 纵向合并时段列 (S1...) 和 时长列 (2h...)
+                                # 即使 r_idx == slot_merge_start (单行)，合并也是安全的
+                                ws_slot.merge_cells(start_row=slot_merge_start, start_column=1, end_row=r_idx, end_column=1)
+                                ws_slot.merge_cells(start_row=slot_merge_start, start_column=2, end_row=r_idx, end_column=2)
                                 
-                                # 2. [核心新增] 纵向合并时段列 (S1...) 和 时长列 (2h...)
-                                # 如果起始行 < 当前行，说明有多行，需要合并
-                                # 即使只有一行，执行 merge 也没副作用，或者加上 if r_idx > slot_merge_start 判断
-                                ws_slot.merge_cells(start_row=slot_merge_start, start_column=1, end_row=r_idx, end_column=1) # 合并时段
-                                ws_slot.merge_cells(start_row=slot_merge_start, start_column=2, end_row=r_idx, end_column=2) # 合并时长
-                                
-                                # 设置居中对齐 (必须设置在左上角单元格)
+                                # 设置居中对齐 (针对合并后的左上角单元格)
                                 ws_slot.cell(row=slot_merge_start, column=1).alignment = center_align
                                 ws_slot.cell(row=slot_merge_start, column=2).alignment = center_align
                                 
-                                # 更新下一组的起始行
+                                # 2. [后] 画粗底边 (Outline) - 修复 Bug
+                                # 即使第1、2列已经合并了，我们依然要给 row=r_idx (该组最后一行) 的所有单元格设置底边框。
+                                # Excel 会根据合并区域最底部单元格的边框来渲染整体边框。
+                                for c_idx in range(1, 8):
+                                    cell = ws_slot.cell(row=r_idx, column=c_idx)
+                                    cell.border = thick_border
+                                
+                                # 更新下一组起始行
                                 slot_merge_start = r_idx + 1
                             else:
                                 # 组内画浅色线
@@ -1402,20 +1398,5 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 df_to_measure = df_overview
                             else:
                                 df_to_measure = df_class_export
-                                
-                            for idx, col in enumerate(df_to_measure.columns):
-                                max_len = max(
-                                    len(str(col)),
-                                    df_to_measure[col].astype(str).str.len().max() if not df_to_measure[col].empty else 0
-                                )
-                                adjusted_width = min(max_len + 4, 60)
-                                worksheet.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
-                    
-                    st.download_button(
-                        label="📥 下载Excel文件",
-                        data=output.getvalue(),
-                        file_name=f"{sol['name'].replace('：', '_')}_排课结果.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
 if __name__ == "__main__":
     main()
