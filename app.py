@@ -1055,7 +1055,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     if not schedule_data:
                         st.info("暂无数据")
                     else:
-                        # ========== HTML 表格 (精确槽位填充版) ==========
                         
                         table_css = """
                         <style>
@@ -1124,7 +1123,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         """
                         
                         html_rows = []
-                        # 确保按照时段排序，组内按 extract_timetable 的逻辑排序（已按科目排序）
                         from itertools import groupby
                         schedule_data.sort(key=lambda x: (natural_sort_key(x['时段']), x.get('sort_key_subject', '')))
                         
@@ -1135,12 +1133,10 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 border_class = "group-border-bottom" if i == row_count - 1 else "normal-border-bottom"
                                 row_html = f"<tr class='{border_class}'>"
                                 
-                                # 1. 时段 & 时长
                                 if i == 0:
                                     row_html += f"<td class='col-slot' rowspan='{row_count}'>{item['时段']}</td>"
                                     row_html += f"<td class='col-duration' rowspan='{row_count}'>{item['时长']}</td>"
                                 
-                                # 2. 课程流程
                                 flow_html = '<div class="timeline-container">'
                                 display_items = item.get('display_items', [])
                                 
@@ -1166,18 +1162,14 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 flow_html += '</div>'
                                 row_html += f"<td>{flow_html}</td>"
                                 
-                                # 3. 人数
                                 row_html += f"<td class='col-count'>{item['人数']}</td>"
                                 
-                                # 4. [核心修复] 物理三列配套 - 精确槽位填充
                                 pkg_slots = ["-", "-", "-"]
                                 
                                 for d_item in display_items:
-                                    # 获取精确的相对槽位列表，例如 [0, 2]
-                                    # 使用 .get 默认为 [] 防止旧数据报错
+
                                     relative_slots = d_item.get('relative_slots', [])
                                     
-                                    # 兼容旧逻辑：如果没有 relative_slots (比如 Gap)，尝试用 start_offset
                                     if not relative_slots and 'start_offset' in d_item:
                                          try:
                                             dur = int(d_item['duration'].replace('h',''))
@@ -1185,12 +1177,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                          start = d_item['start_offset']
                                          relative_slots = range(start, start + dur)
 
-                                    # 获取内容
                                     pkg_str = d_item.get('packages_str', '-')
                                     if not pkg_str or d_item.get('is_gap', False): 
                                         pkg_str = "-"
                                     
-                                    # 填充指定槽位
+
                                     for slot_idx in relative_slots:
                                         if 0 <= slot_idx < 3:
                                             pkg_slots[slot_idx] = pkg_str
@@ -1220,7 +1211,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         """
                         st.markdown(full_html, unsafe_allow_html=True)
 
-                    # ========== 统计信息 ==========
+                    # Show result
                     st.markdown("### 📊 统计信息")
                     df_slot = pd.DataFrame(schedule_data)
                     cols_to_drop = ['display_items', 'sort_key_subject']
@@ -1261,9 +1252,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         df_class_export.to_excel(writer, sheet_name='开班详情', index=False)
                         
                         
-                        # =========================================================
-                        # 2. 处理 "时段总表" Sheet (保持配套分3列逻辑)
-                        # =========================================================
                         df_slot = pd.DataFrame(raw_slot_data)
                         
                         p1_list, p2_list, p3_list = [], [], []
@@ -1314,7 +1302,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         df_overview.columns = ['科目 SUBJECT', '配套 PACKAGE']
                         
                         # Sheet 3
-                        df_overview.to_excel(writer, sheet_name='倒入', index=False)
+                        df_overview.to_excel(writer, sheet_name='导入', index=False)
                         
                         
 
