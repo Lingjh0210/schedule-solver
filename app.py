@@ -1015,11 +1015,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
     
     st.markdown("---")
 
-    # Solving button (修改原来的 button 代码)
-    # disabled=disable_solve 可以防止用户在必无解的情况下浪费时间
-    if st.button("🎯 生成排课方案", type="primary", use_container_width=True, disabled=disable_solve):
-        # ... (原来的求解逻辑保持不变) ...
-    # Solving button
     st.markdown('<div class="sub-header">🚀 开始求解</div>', unsafe_allow_html=True)
     
     if st.button("🎯 生成排课方案", type="primary", use_container_width=True):
