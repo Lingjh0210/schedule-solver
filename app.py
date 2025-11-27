@@ -1237,44 +1237,54 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         st.metric("平均每时段条目", f"{avg:.1f}")
                 # Export              
                 with tab3:
-                    # 导出为Excel
+                    # Excel file
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        # 获取数据
-                        df_class = pd.DataFrame(sol['class_details'])
-                        df_slot = pd.DataFrame(sol['slot_schedule'])
+                        raw_class_data = sol['class_details']
+                        raw_slot_data = sol['slot_schedule']
                         
-                        # ========== [核心修改] 处理时段总表：配套分列 ==========
-                        # 我们需要解析 display_items，生成 3 个独立的配套列
+                        df_class = pd.DataFrame(raw_class_data)
                         
-                        # 准备 3 个新列的数据列表
+                        def format_subject_class_col(row):
+                            suffix = row['班级'].replace('班', '')
+                            if suffix:
+                                return f"{row['科目']} {suffix}"
+                            else:
+                                return row['科目']
+
+                        df_class = df_class.sort_values(by=['科目', '班级'])
+                        
+                        df_class['科目 & 班级'] = df_class.apply(format_subject_class_col, axis=1)
+                        
+                        df_class_export = df_class[['科目 & 班级', '人数', '时段', '学生配套']]
+                        
+                        df_class_export.to_excel(writer, sheet_name='开班详情', index=False)
+                        
+                        
+                        # =========================================================
+                        # 2. 处理 "时段总表" Sheet (保持配套分3列逻辑)
+                        # =========================================================
+                        df_slot = pd.DataFrame(raw_slot_data)
+                        
                         p1_list, p2_list, p3_list = [], [], []
                         
-                        for _, row in df_slot.iterrows():
-                            # 初始化 3 个槽位
+                        for item in raw_slot_data:
                             current_pkg_slots = ["-", "-", "-"]
+                            d_items = item.get('display_items', [])
                             
-                            # 获取前端显示用的元数据
-                            d_items = row.get('display_items', [])
                             if isinstance(d_items, list):
-                                for item in d_items:
-                                    # 获取配套文字
-                                    pkg_str = item.get('packages_str', '-')
-                                    if not pkg_str or item.get('is_gap', False):
+                                for sub_item in d_items:
+                                    pkg_str = sub_item.get('packages_str', '-')
+                                    if not pkg_str or sub_item.get('is_gap', False):
                                         pkg_str = "-"
                                     
-                                    # 获取精确的槽位索引 [0, 1, 2]
-                                    rel_slots = item.get('relative_slots', [])
-                                    
-                                    # 兼容性 fallback (防止旧数据报错)
-                                    if not rel_slots and 'start_offset' in item:
-                                        try:
-                                            dur = int(item['duration'].replace('h',''))
+                                    rel_slots = sub_item.get('relative_slots', [])
+                                    if not rel_slots and 'start_offset' in sub_item:
+                                        try: dur = int(sub_item['duration'].replace('h',''))
                                         except: dur = 1
-                                        start = item['start_offset']
+                                        start = sub_item['start_offset']
                                         rel_slots = range(start, start + dur)
-                                    
-                                    # 填充槽位
+                                        
                                     for idx in rel_slots:
                                         if 0 <= idx < 3:
                                             current_pkg_slots[idx] = pkg_str
@@ -1283,50 +1293,32 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             p2_list.append(current_pkg_slots[1])
                             p3_list.append(current_pkg_slots[2])
                         
-                        # 将新列加入 DataFrame
                         df_slot['配套 (第1小时)'] = p1_list
                         df_slot['配套 (第2小时)'] = p2_list
                         df_slot['配套 (第3小时)'] = p3_list
                         
-                        # 剔除不需要的辅助列和旧的合并列
-                        cols_to_drop = ['display_items', 'sort_key_subject', '涉及配套'] # 删掉旧的'涉及配套'
-                        df_slot = df_slot.drop(columns=[c for c in cols_to_drop if c in df_slot.columns])
+                        drops = ['display_items', 'sort_key_subject', '涉及配套']
+                        df_slot = df_slot.drop(columns=[c for c in drops if c in df_slot.columns])
                         
-                        # 调整列顺序 (把配套放到最后)
-                        # 先获取所有列名，然后重新排列
                         base_cols = [c for c in df_slot.columns if '配套' not in c]
-                        new_pkg_cols = ['配套 (第1小时)', '配套 (第2小时)', '配套 (第3小时)']
-                        df_slot = df_slot[base_cols + new_pkg_cols]
+                        new_cols = ['配套 (第1小时)', '配套 (第2小时)', '配套 (第3小时)']
+                        df_slot = df_slot[base_cols + new_cols]
                         
-                        # ===================================================
-                        
-                        # [开班详情] 排序
-                        df_class = df_class.sort_values(by=['科目', '班级'])
-                        
-                        # 1. 写入 "开班详情" Sheet
-                        df_class.to_excel(writer, sheet_name='开班详情', index=False)
-                        
-                        # 2. 写入 "时段总表" Sheet
+                        # Sheet 2
                         df_slot.to_excel(writer, sheet_name='时段总表', index=False)
                         
-                        # 3. 写入 "所有班级及涉及的配套" Sheet
-                        df_overview = df_class.copy()
                         
-                        # 定义合并逻辑函数：处理空格和空后缀
-                        def format_subject_class(row):
-                            suffix = row['班级'].replace('班', '')
-                            if suffix:
-                                return f"{row['科目']} {suffix}"
-                            else:
-                                return row['科目']
 
-                        df_overview['科目 & 班级'] = df_overview.apply(format_subject_class, axis=1)
+                        # 直接基于处理好的 df_class_export 提取，不用重新做一遍合并
+                        df_overview = df_class_export[['科目 & 班级', '学生配套']].copy()
+                        df_overview.columns = ['科目 SUBJECT', '配套 PACKAGE']
                         
-                        df_overview = df_overview[['科目 & 班级', '学生配套']]
-                        df_overview.columns = ['科目 & 班级', '涉及配套']
-                        df_overview.to_excel(writer, sheet_name='导入', index=False)
+                        # Sheet 3
+                        df_overview.to_excel(writer, sheet_name='倒入', index=False)
                         
-                        # === 自动调整列宽 ===
+                        
+
+                        # adjust column width
                         workbook = writer.book
                         for sheet_name in writer.sheets:
                             worksheet = writer.sheets[sheet_name]
@@ -1335,7 +1327,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             elif sheet_name == '导入':
                                 df_to_measure = df_overview
                             else:
-                                df_to_measure = df_class
+                                df_to_measure = df_class_export
                                 
                             for idx, col in enumerate(df_to_measure.columns):
                                 max_len = max(
