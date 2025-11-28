@@ -1315,7 +1315,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             config
         )
         
-       # ... (在 st.button("🎯 生成排课方案"...) 内部) ...
 
         # Update solution configs to include Scheme C
         solution_configs = [
@@ -1339,6 +1338,9 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 percentage_text = st.empty()
         
         # ... (在 progress_bar = st.progress(0) 之后) ...
+        solutions = []
+        total_steps = len(solution_configs) * 3 
+        current_step = 0
         
         import math # 确保导入 math
 
