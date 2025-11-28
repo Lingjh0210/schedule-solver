@@ -853,6 +853,38 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
         'max_class_size': int(suggested_max_size),
         'num_slots': int(max(suggested_slots, 8)) 
     }  
+def on_max_classes_change():
+    """
+    当【每科目最大班数】改变时触发：
+    自动重新计算并更新【最大班额】的建议值
+    """
+    # 1. 确保有数据且有当前设置
+    if 'packages' not in st.session_state:
+        return
+        
+    # 获取用户刚刚修改后的“最大班数”
+    # 注意：这里需要通过 session_state 获取，因为 widget 还没重绘完成
+    current_max_classes = st.session_state.get('param_max_classes', 3)
+    
+    # 2. 获取人数最多的科目人数
+    enrollment = calculate_subject_enrollment(st.session_state['packages'])
+    if not enrollment:
+        return
+    max_student_count = max(enrollment.values())
+    
+    # 3. 重新计算理论底线
+    import math
+    # 逻辑：总人数 / 班数 = 单班最小容量
+    raw_new_size = math.ceil(max_student_count / current_max_classes)
+    suggested_new_size = raw_new_size + 2 # 保持一点余量
+    
+    # 4. 更新【最大班额】的 Session State
+    # Streamlit 会在重新运行脚本时，把这个新值填入 number_input
+    st.session_state['param_max_size'] = int(suggested_new_size)
+    
+    # 5. (可选) 给个提示
+    st.toast(f"已根据 {current_max_classes} 个班重新计算，最大班额调整为 {suggested_new_size} 人", icon="🔄")
+
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
@@ -991,7 +1023,13 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         )
         
         # 3. 每科目最大班数
-        max_classes_per_subject = st.number_input("每科目最大班数", min_value=1, max_value=10, value=2, step=1)
+        max_classes_per_subject = st.number_input(
+            "每科目最大班数", 
+            min_value=1, max_value=10, 
+            step=1,
+            key="param_max_classes",      # <--- 1. 绑定 Key
+            on_change=on_max_classes_change # <--- 2. 绑定刚才写的回调函数
+        )
         
         # 4. 时段组数量
         if 'param_num_slots' not in st.session_state:
