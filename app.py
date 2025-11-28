@@ -435,7 +435,7 @@ class ScheduleSolver:
             total_raw_penalty = 0    
             
             # 默认允许 4 人误差
-            allowed_gap = self.config.get('balance_tolerance', 4)
+            allowed_gap = self.config.get('balance_tolerance', 7)
             
             for k in self.subjects:
                 # ... (中间的变量定义和 Max/Min 计算逻辑完全不变，直接保留) ...
