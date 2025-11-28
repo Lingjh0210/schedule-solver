@@ -428,78 +428,68 @@ class ScheduleSolver:
 
         elif objective_type == 'subject_balanced':
             # ==============================================================================
-            # [方案C] 科目内均衡 (Per-Subject Balance)
-            # 策略：
-            # 1. 奖励多开班 (负权重)：鼓励在满足最小班额的前提下，尽量拆成小班
-            # 2. 惩罚科目内极差：让同一个科目下的班级人数尽可能接近
+            # [方案C - 宽容均衡版] 硬编码允许 4 人误差
             # ==============================================================================
             
-            total_imbalance_penalty = 0
+            total_excess_penalty = 0 
+            total_raw_penalty = 0    
             
-            # 遍历每个科目，单独计算它的内部不平衡度
+            # 🔥 这里是重点：如果你没做第一步，这里会自动使用 4 作为默认值
+            # 你可以在这里直接把 4 改成 3 或 5
+            allowed_gap = self.config.get('balance_tolerance', 4)
+            
             for k in self.subjects:
-                
-                # 准备变量列表
+                # ... (中间的 Max/Min 计算逻辑完全不用变，直接复制上一条回复的代码) ...
                 k_effective_sizes_max = [] 
                 k_effective_sizes_min = [] 
                 
-                # 判断该科目是否至少开了一个班 (辅助变量)
-                # 如果某科目完全没开班，我们不应该计算它的极差
                 subject_active = model.NewBoolVar(f'active_subj_{k}')
-                model.Add(sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1)) >= 1).OnlyEnforceIf(subject_active)
-                model.Add(sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1)) == 0).OnlyEnforceIf(subject_active.Not())
+                class_count = sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1))
+                model.Add(class_count >= 1).OnlyEnforceIf(subject_active)
+                model.Add(class_count == 0).OnlyEnforceIf(subject_active.Not())
 
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
-                    # 计算班级 r 的实际人数
                     actual_size = sum(
                         self.packages[p]['人数'] * u_pkr[(p, k, r)] 
                         for p in self.package_names
                     )
-                    
-                    # --- Max 列表构建 ---
-                    # 开启则为实际人数，关闭则为 0
                     eff_max = model.NewIntVar(0, 200, f'eff_max_C_{k}_{r}')
                     model.Add(eff_max == actual_size).OnlyEnforceIf(u_r[(k, r)])
                     model.Add(eff_max == 0).OnlyEnforceIf(u_r[(k, r)].Not())
                     k_effective_sizes_max.append(eff_max)
                     
-                    # --- Min 列表构建 ---
-                    # 开启则为实际人数，关闭则为 200 (设大值以被 Min 函数忽略)
                     eff_min = model.NewIntVar(0, 200, f'eff_min_C_{k}_{r}')
                     model.Add(eff_min == actual_size).OnlyEnforceIf(u_r[(k, r)])
                     model.Add(eff_min == 200).OnlyEnforceIf(u_r[(k, r)].Not())
                     k_effective_sizes_min.append(eff_min)
                 
-                # 定义该科目的 Max 和 Min
                 k_max_size = model.NewIntVar(0, 200, f'k_max_C_{k}')
                 k_min_size = model.NewIntVar(0, 200, f'k_min_C_{k}')
-                
                 model.AddMaxEquality(k_max_size, k_effective_sizes_max)
                 model.AddMinEquality(k_min_size, k_effective_sizes_min)
                 
-                # 计算极差 (Max - Min)
                 k_range = model.NewIntVar(0, 200, f'range_C_{k}')
-                
-                # 只有当科目激活时，k_range = Max - Min
-                # 如果科目未激活，k_range = 0 (因为此时 Max=0, Min=200，直接相减是负数，需要修正)
                 model.Add(k_range == k_max_size - k_min_size).OnlyEnforceIf(subject_active)
                 model.Add(k_range == 0).OnlyEnforceIf(subject_active.Not())
                 
-                total_imbalance_penalty += k_range
+                # 计算超标误差
+                k_excess = model.NewIntVar(0, 200, f'excess_C_{k}')
+                model.Add(k_excess >= k_range - allowed_gap).OnlyEnforceIf(subject_active)
+                model.Add(k_excess >= 0)
+                
+                total_excess_penalty += k_excess
+                total_raw_penalty += k_range
 
             # --- 权重配置 ---
-            # 1. 开班奖励 (-100): 只要符合最小班额，多开一个班就奖励 100 分 -> 促进小班化
-            weight_class_reward = -100  
-            
-            # 2. 均衡惩罚 (200): 极差每增加 1 人，惩罚 200 分 -> 保证科目内部平分
-            weight_balance = 200 
-            
-            # 3. 切分惩罚
+            weight_class_reward = -50000  
+            weight_excess = 10000 # 重罚超标
+            weight_raw = 10       # 轻罚原始
             weight_split = self.config.get('slot_split_penalty', 1000)
             
             model.Minimize(
                 total_classes * weight_class_reward + 
-                total_imbalance_penalty * weight_balance + 
+                total_excess_penalty * weight_excess + 
+                total_raw_penalty * weight_raw + 
                 slot_split_penalty * (weight_split / 100) + 
                 priority_penalty
             )
