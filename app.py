@@ -494,9 +494,9 @@ class ScheduleSolver:
                 total_raw_penalty += k_range
 
             # --- 权重配置 (保持核弹级严厉) ---
-            weight_class_reward = -50000  # 鼓励拆班
+            weight_class_reward = 5000  # 鼓励拆班
             weight_excess = 1000000       # 严禁误差超标
-            weight_raw = 10               # 引导微调
+            weight_raw = 2000              # 引导微调
             weight_split = self.config.get('slot_split_penalty', 1000)
             
             model.Minimize(
