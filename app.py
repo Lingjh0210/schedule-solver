@@ -991,7 +991,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         )
         
         # 3. 每科目最大班数
-        max_classes_per_subject = st.number_input("每科目最大班数", min_value=1, max_value=10, value=3, step=1)
+        max_classes_per_subject = st.number_input("每科目最大班数", min_value=1, max_value=10, value=2, step=1)
         
         # 4. 时段组数量
         if 'param_num_slots' not in st.session_state:
