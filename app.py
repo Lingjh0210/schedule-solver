@@ -1015,6 +1015,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         if 'param_max_size' not in st.session_state:
             st.session_state['param_max_size'] = 60
             
+        st.info("💡提示: 以自动计算最低有解要求，若无解可以手动+1")    
         max_class_size = st.number_input(
             "最大班额", 
             min_value=1, max_value=200, 
