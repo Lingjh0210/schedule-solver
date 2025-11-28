@@ -796,6 +796,63 @@ def check_data_feasibility(packages, subject_hours, config):
 
     return issues
     
+ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
+    """根据数据计算最低有解参数"""
+    import math
+    
+    enrollment = calculate_subject_enrollment(packages)
+    if not enrollment:
+        return {}
+
+    # 1. 计算【最小班额】的上限
+    # 逻辑：如果只有 3 个人选修历史，你的最小班额就不能设成 5，否则历史课就无解
+    min_student_count = min(enrollment.values())
+    suggested_min_size = min(5, min_student_count)  # 默认5，但如果有科目人数更少，就取更小的
+
+    # 2. 计算【最大班额】的下限
+    # 逻辑：如果有 100 人选修数学，限制最多开 3 个班，那最大班额至少得是 ceil(100/3) = 34
+    max_student_count = max(enrollment.values())
+    # 假设默认每科最多开3个班（这里先写死3，或者读取当前配置）
+    assumed_max_classes = 3 
+    suggested_max_size = max(40, math.ceil(max_student_count / assumed_max_classes))
+
+    # 3. 计算【时段组数量】的下限
+    # 逻辑：找出耗时最长的科目/配套，看看至少需要多少个时间片
+    # 总容量 = (groups-1)*2 + 3
+    # 逆推 groups = ceil((所需小时 - 3)/2) + 1
+    
+    # A. 检查科目教师资源瓶颈
+    max_subject_hours_needed = 0
+    for subj, hours in subject_hours.items():
+        # 估算该科目需要多少个班：总人数 / 最大班额 (用刚才算的 safe max)
+        est_classes = math.ceil(enrollment[subj] / suggested_max_size)
+        # 考虑并发 (如果有2个老师，时间减半)
+        slots_needed = (est_classes * hours) / default_concurrency
+        if slots_needed > max_subject_hours_needed:
+            max_subject_hours_needed = slots_needed
+            
+    # B. 检查学生配套负荷瓶颈
+    max_package_hours = 0
+    for pkg in packages.values():
+        total_h = sum(pkg['科目'].values())
+        if total_h > max_package_hours:
+            max_package_hours = total_h
+            
+    # 取两者中最大的需求
+    hard_limit_hours = max(max_subject_hours_needed, max_package_hours)
+    
+    # 转换为时段组数量 (Group)
+    # 容量模型: (G-1)*2 + 3 >= Hours
+    if hard_limit_hours <= 3:
+        suggested_slots = 1
+    else:
+        suggested_slots = math.ceil((hard_limit_hours - 3) / 2) + 1
+        
+    return {
+        'min_class_size': int(suggested_min_size),
+        'max_class_size': int(suggested_max_size),
+        'num_slots': int(max(suggested_slots, 8)) # 至少给8个组，太少也不现实
+    }   
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
@@ -872,23 +929,85 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             label_visibility="collapsed"
         )
         
+        # ... (在 st.file_uploader 之后) ...
+    
         if uploaded_file:
+            # 1. 检查是否是新文件 (利用文件名判断)
+            # 如果不加这个判断，每次点击按钮都会重置用户的参数，用户会疯掉
+            is_new_file = False
+            if 'last_uploaded_file' not in st.session_state or st.session_state['last_uploaded_file'] != uploaded_file.name:
+                is_new_file = True
+                st.session_state['last_uploaded_file'] = uploaded_file.name
+    
             with st.spinner("正在解析文件..."):
                 packages, subject_hours, max_hours = parse_uploaded_file(uploaded_file)
             
             if packages and subject_hours:
-                st.success(f"✅ 成功加载 {len(packages)} 个配套，{len(subject_hours)} 个科目")
+                # 存入 session
                 st.session_state['packages'] = packages
                 st.session_state['subject_hours'] = subject_hours
-                st.session_state['max_total_hours'] = max_hours  # 保存最大总课时
+                st.session_state['max_total_hours'] = max_hours
+    
+                # === 🔥 核心修改：如果是新文件，自动计算并填充参数 ===
+                if is_new_file:
+                    defaults = calculate_smart_defaults(packages, subject_hours)
+                    
+                    # 直接更新 session_state，这会改变下方输入框的默认值
+                    st.session_state['param_min_size'] = defaults['min_class_size']
+                    st.session_state['param_max_size'] = defaults['max_class_size']
+                    st.session_state['param_num_slots'] = defaults['num_slots']
+                    
+                    st.toast(f"已根据数据自动调整：最小班额{defaults['min_class_size']}人, 最大{defaults['max_class_size']}人, 时段{defaults['num_slots']}组", icon="🪄")
+                # ====================================================
         
         st.markdown("---")
         
         st.subheader("🔧 求解参数")
         
-        min_class_size = st.number_input("最小班额", min_value=1, max_value=100, value=5, step=1)
-        max_class_size = st.number_input("最大班额", min_value=1, max_value=200, value=60, step=1)
+        # 注意：这里增加了 key 参数，并且 value 设为 None (或者是默认值)
+        # 如果 session_state 里有这个 key，Streamlit 会自动用 session 里的值
+        # 如果没有，才会用 value 的值
+        
+        # 1. 最小班额
+        if 'param_min_size' not in st.session_state:
+            st.session_state['param_min_size'] = 5 # 初始默认值
+            
+        min_class_size = st.number_input(
+            "最小班额", 
+            min_value=1, max_value=100, 
+            key="param_min_size", # <--- 绑定到 Session State
+            step=1
+        )
+
+        # 2. 最大班额
+        if 'param_max_size' not in st.session_state:
+            st.session_state['param_max_size'] = 60
+            
+        max_class_size = st.number_input(
+            "最大班额", 
+            min_value=1, max_value=200, 
+            key="param_max_size", # <--- 绑定到 Session State
+            step=1
+        )
+        
+        # 3. 每科目最大班数
         max_classes_per_subject = st.number_input("每科目最大班数", min_value=1, max_value=10, value=3, step=1)
+        
+        # 4. 时段组数量
+        if 'param_num_slots' not in st.session_state:
+             # 原来的逻辑：根据 max_hours 推荐，或者默认 10
+             if 'max_total_hours' in st.session_state:
+                 st.session_state['param_num_slots'] = calculate_recommended_slots(st.session_state['max_total_hours'])
+             else:
+                 st.session_state['param_num_slots'] = 10
+
+        num_slots = st.number_input(
+            "时段组数量", 
+            min_value=1, max_value=30, 
+            key="param_num_slots", # <--- 绑定到 Session State
+            step=1,
+            help="系统已根据总学时自动计算推荐值"
+        )
         
         # 智能推荐时段组数
         if 'max_total_hours' in st.session_state:
@@ -1008,11 +1127,8 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.dataframe(df_enrollment, use_container_width=True)
     
     st.markdown("---")
-    # ... (在 st.subheader("🔧 求解参数") 部分之后) ...
     
-    # 实时构建当前配置对象
-    # 实时构建当前配置对象
-    # 务必确保这里包含 check_data_feasibility 函数需要的所有参数
+
     current_config = {
         'min_class_size': min_class_size,
         'max_class_size': max_class_size,
