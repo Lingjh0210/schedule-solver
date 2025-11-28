@@ -825,7 +825,7 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     raw_max_size = math.ceil(max_student_count / assumed_max_classes)
     
     # 稍微加 1-2 人的余量防止太拥挤导致无解 (可选，不想加就直接用 raw_max_size)
-    suggested_max_size = raw_max_size + 2 
+    suggested_max_size = raw_max_size + 3
 
     # 3. 时段组数量 (保持不变)
     max_subject_hours_needed = 0
@@ -1015,7 +1015,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         if 'param_max_size' not in st.session_state:
             st.session_state['param_max_size'] = 60
             
-        st.info("💡提示: 已自动计算最低有解要求，若无解可以手动+1，如果要极致减少开班数可以把班额上限尽量放大")    
+        st.info("💡提示: 已自动计算最低有解要求，若无解可以手动把最大班额+1，如果要极致减少开班数可以把班额上限尽量放大")    
         max_class_size = st.number_input(
             "最大班额", 
             min_value=1, max_value=200, 
