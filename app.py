@@ -817,7 +817,7 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     
     # 获取当前允许的最大班数 (如果你在 UI 上默认是 3，这里就用 3)
     # 关键点：这个值必须和下面 st.number_input 的默认值保持一致
-    assumed_max_classes = 2 
+    assumed_max_classes = 1
     
     # 🔥 核心修正：直接向上取整，不加任何人工保底
     # 比如：总人数 100，允许 3 个班 -> ceil(33.3) = 34
@@ -877,7 +877,7 @@ def on_max_classes_change():
     import math
     # 逻辑：总人数 / 班数 = 单班最小容量
     raw_new_size = math.ceil(max_student_count / current_max_classes)
-    suggested_new_size = raw_new_size + 2 # 保持一点余量
+    suggested_new_size = raw_new_size + 3 # 保持一点余量
     
     # 4. 更新【最大班额】的 Session State
     # Streamlit 会在重新运行脚本时，把这个新值填入 number_input
