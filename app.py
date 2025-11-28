@@ -797,52 +797,52 @@ def check_data_feasibility(packages, subject_hours, config):
     return issues
     
 def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
-    """根据数据计算最低有解参数"""
+    """
+    计算【真·理论底线】参数
+    去掉人为的 40 人保底，完全基于数学除法
+    """
     import math
     
     enrollment = calculate_subject_enrollment(packages)
     if not enrollment:
         return {}
 
-    # 1. 计算【最小班额】的上限
-    # 逻辑：如果只有 3 个人选修历史，你的最小班额就不能设成 5，否则历史课就无解
+    # 1. 最小班额 (保持不变)
     min_student_count = min(enrollment.values())
-    suggested_min_size = min(5, min_student_count)  # 默认5，但如果有科目人数更少，就取更小的
+    suggested_min_size = min(5, min_student_count)
 
-    # 2. 计算【最大班额】的下限
-    # 逻辑：如果有 100 人选修数学，限制最多开 3 个班，那最大班额至少得是 ceil(100/3) = 34
+    # 2. 最大班额 (修正：去掉 max(40) 的硬限制)
     max_student_count = max(enrollment.values())
-    # 假设默认每科最多开3个班（这里先写死3，或者读取当前配置）
-    assumed_max_classes = 3 
-    suggested_max_size = max(40, math.ceil(max_student_count / assumed_max_classes))
-
-    # 3. 计算【时段组数量】的下限
-    # 逻辑：找出耗时最长的科目/配套，看看至少需要多少个时间片
-    # 总容量 = (groups-1)*2 + 3
-    # 逆推 groups = ceil((所需小时 - 3)/2) + 1
     
-    # A. 检查科目教师资源瓶颈
+    # 获取当前允许的最大班数 (如果你在 UI 上默认是 3，这里就用 3)
+    # 关键点：这个值必须和下面 st.number_input 的默认值保持一致
+    assumed_max_classes = 3 
+    
+    # 🔥 核心修正：直接向上取整，不加任何人工保底
+    # 比如：总人数 100，允许 3 个班 -> ceil(33.3) = 34
+    # 比如：总人数 25， 允许 3 个班 -> ceil(8.3) = 9
+    # 这样算出来的就是“刚好能塞进去”的数值
+    raw_max_size = math.ceil(max_student_count / assumed_max_classes)
+    
+    # 稍微加 1-2 人的余量防止太拥挤导致无解 (可选，不想加就直接用 raw_max_size)
+    suggested_max_size = raw_max_size + 2 
+
+    # 3. 时段组数量 (保持不变)
     max_subject_hours_needed = 0
     for subj, hours in subject_hours.items():
-        # 估算该科目需要多少个班：总人数 / 最大班额 (用刚才算的 safe max)
         est_classes = math.ceil(enrollment[subj] / suggested_max_size)
-        # 考虑并发 (如果有2个老师，时间减半)
         slots_needed = (est_classes * hours) / default_concurrency
         if slots_needed > max_subject_hours_needed:
             max_subject_hours_needed = slots_needed
             
-    # B. 检查学生配套负荷瓶颈
     max_package_hours = 0
     for pkg in packages.values():
         total_h = sum(pkg['科目'].values())
         if total_h > max_package_hours:
             max_package_hours = total_h
             
-    # 取两者中最大的需求
     hard_limit_hours = max(max_subject_hours_needed, max_package_hours)
     
-    # 转换为时段组数量 (Group)
-    # 容量模型: (G-1)*2 + 3 >= Hours
     if hard_limit_hours <= 3:
         suggested_slots = 1
     else:
@@ -851,8 +851,8 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     return {
         'min_class_size': int(suggested_min_size),
         'max_class_size': int(suggested_max_size),
-        'num_slots': int(max(suggested_slots, 8)) # 至少给8个组，太少也不现实
-    }   
+        'num_slots': int(max(suggested_slots, 8)) 
+    }  
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
