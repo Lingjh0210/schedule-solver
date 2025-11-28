@@ -413,7 +413,7 @@ class ScheduleSolver:
             model.AddMinEquality(min_size, effective_sizes_for_min)
 
 
-            weight_class = -5000  
+            weight_class = -100 
             
             weight_balance = 200 
             weight_split = self.config.get('slot_split_penalty', 1000) 
