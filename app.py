@@ -428,7 +428,9 @@ class ScheduleSolver:
 
         elif objective_type == 'subject_balanced':
             # ==============================================================================
-            # [方案C - 严厉均衡版] 绝对禁止误差超过 4 人
+            # [方案C - 精品小班版] 
+            # 特性1: 绝对禁止误差超过 4 人 (核弹级惩罚)
+            # 特性2: [新增] 单班上限强制锁定 24 人
             # ==============================================================================
             
             total_excess_penalty = 0 
@@ -437,8 +439,11 @@ class ScheduleSolver:
             # 默认允许 4 人误差
             allowed_gap = self.config.get('balance_tolerance', 7)
             
+            # [新增] 方案C 专用的硬性班额上限
+            scheme_c_max_size = 24
+
             for k in self.subjects:
-                # ... (中间的变量定义和 Max/Min 计算逻辑完全不变，直接保留) ...
+                # 辅助变量定义
                 k_effective_sizes_max = [] 
                 k_effective_sizes_min = [] 
                 
@@ -448,10 +453,18 @@ class ScheduleSolver:
                 model.Add(class_count == 0).OnlyEnforceIf(subject_active.Not())
 
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
+                    # 计算班级 r 的实际人数
                     actual_size = sum(
                         self.packages[p]['人数'] * u_pkr[(p, k, r)] 
                         for p in self.package_names
                     )
+                    
+                    # 🔥🔥🔥 [核心修改] 强制限制：方案C 最大班额不得超过 24 人 🔥🔥🔥
+                    # 无论全局最大班额设置多少，方案C必须遵守这个更严格的限制
+                    # 注意：如果 u_r[(k, r)] 为 0 (不开班)，actual_size 自动为 0，也满足 <= 24
+                    model.Add(actual_size <= scheme_c_max_size)
+
+                    # Max/Min 辅助变量计算 (保持不变)
                     eff_max = model.NewIntVar(0, 200, f'eff_max_C_{k}_{r}')
                     model.Add(eff_max == actual_size).OnlyEnforceIf(u_r[(k, r)])
                     model.Add(eff_max == 0).OnlyEnforceIf(u_r[(k, r)].Not())
@@ -462,6 +475,7 @@ class ScheduleSolver:
                     model.Add(eff_min == 200).OnlyEnforceIf(u_r[(k, r)].Not())
                     k_effective_sizes_min.append(eff_min)
                 
+                # 科目极差计算 (保持不变)
                 k_max_size = model.NewIntVar(0, 200, f'k_max_C_{k}')
                 k_min_size = model.NewIntVar(0, 200, f'k_min_C_{k}')
                 model.AddMaxEquality(k_max_size, k_effective_sizes_max)
@@ -471,7 +485,7 @@ class ScheduleSolver:
                 model.Add(k_range == k_max_size - k_min_size).OnlyEnforceIf(subject_active)
                 model.Add(k_range == 0).OnlyEnforceIf(subject_active.Not())
                 
-                # 计算超标误差
+                # 超标误差计算 (保持不变)
                 k_excess = model.NewIntVar(0, 200, f'excess_C_{k}')
                 model.Add(k_excess >= k_range - allowed_gap).OnlyEnforceIf(subject_active)
                 model.Add(k_excess >= 0)
@@ -479,18 +493,10 @@ class ScheduleSolver:
                 total_excess_penalty += k_excess
                 total_raw_penalty += k_range
 
-            # --- 🔥 权重调整 (关键修改) ---
-            
-            # 1. 开班奖励 (-50,000): 保持诱惑
-            weight_class_reward = -50000  
-            
-            # 2. 超标惩罚 (1,000,000): 提升 100 倍！
-            # 只要超标 1 人，扣 100 万分。这就相当于一道不可逾越的“高压线”。
-            weight_excess = 1000000 
-            
-            # 3. 原始惩罚 (10): 保持微调引导
-            weight_raw = 10
-            
+            # --- 权重配置 (保持核弹级严厉) ---
+            weight_class_reward = -50000  # 鼓励拆班
+            weight_excess = 1000000       # 严禁误差超标
+            weight_raw = 10               # 引导微调
             weight_split = self.config.get('slot_split_penalty', 1000)
             
             model.Minimize(
