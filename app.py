@@ -796,7 +796,7 @@ def check_data_feasibility(packages, subject_hours, config):
 
     return issues
     
- def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
+def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     """根据数据计算最低有解参数"""
     import math
     
