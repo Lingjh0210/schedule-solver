@@ -1338,11 +1338,46 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             with col2:
                 percentage_text = st.empty()
         
-        solutions = []
-        total_steps = len(solution_configs) * 3 
-        current_step = 0
+        # ... (在 progress_bar = st.progress(0) 之后) ...
         
+        import math # 确保导入 math
+
         for i, sol_config in enumerate(solution_configs):
+            # 1. 拷贝配置
+            run_config = config.copy()
+            
+            # 2. 针对方案 C (subject_balanced) 的“精准按需扩容”
+            if sol_config['type'] == 'subject_balanced':
+                enrollment = calculate_subject_enrollment(st.session_state['packages'])
+                max_students = max(enrollment.values()) if enrollment else 0
+                
+                # 方案 C 的硬性门槛
+                scheme_c_limit = 24
+                
+                # 计算“理论最低需求”
+                # 例如：73 人 / 24 = 3.04 -> 需要 4 个班
+                theoretical_needed = math.ceil(max_students / scheme_c_limit)
+                
+                # 🔥 核心修改：取“用户设置”和“最低需求”的较大值
+                # 绝不额外多加，也不搞硬保底
+                current_user_setting = run_config['max_classes_per_subject']
+                new_limit = max(current_user_setting, theoretical_needed)
+                
+                run_config['max_classes_per_subject'] = int(new_limit)
+                
+                # 只有当确实发生了扩容时，才提示用户
+                if new_limit > current_user_setting:
+                    status_text.markdown(f"🔓 **{sol_config['name']}** - 因人数限制，班数上限临时调整为 {new_limit} 个...")
+                    time.sleep(0.5)
+
+            # 3. 实例化求解器
+            solver_instance = ScheduleSolver(
+                st.session_state['packages'],
+                st.session_state['subject_hours'],
+                run_config
+            )
+
+            # ... (后续代码完全不用动：current_step += 1 ... solve ...)
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
