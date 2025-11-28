@@ -1317,17 +1317,16 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         
 
         # Update solution configs to include Scheme C
+        # ==============================================================================
+        # [Step 1] 定义求解方案列表 (确保这里有3个方案)
+        # ==============================================================================
         solution_configs = [
             {'type': 'min_classes', 'name': '方案A：最少开班'},
             {'type': 'balanced', 'name': '方案B：全局均衡'},
-            {'type': 'subject_balanced', 'name': '方案C：精品小班(上限24人)'}  # <--- 新增这行
+            {'type': 'subject_balanced', 'name': '方案C：精品小班(上限24人)'}
         ]
         
-        # Processing Bar
-        # 注意：这里不需要改动 total_steps 的逻辑，因为它是根据 len(solution_configs) 自动计算的
-        # ...
-        
-        # Processing Bar
+        # 进度条初始化
         progress_container = st.container()
         with progress_container:
             progress_bar = st.progress(0)
@@ -1336,50 +1335,60 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 status_text = st.empty()
             with col2:
                 percentage_text = st.empty()
-        
-        # ... (在 progress_bar = st.progress(0) 之后) ...
+
         solutions = []
         total_steps = len(solution_configs) * 3 
         current_step = 0
         
-        import math # 确保导入 math
+        import math # 防止报错
 
+        # ==============================================================================
+        # [Step 2] 循环求解每个方案
+        # ==============================================================================
         for i, sol_config in enumerate(solution_configs):
-            # 1. 拷贝配置
+            
+            # --- 1. 拷贝当前配置 ---
             run_config = config.copy()
             
-            # 2. 针对方案 C (subject_balanced) 的“精准按需扩容”
+            # --- 2. 针对方案 C 的“特权处理” (防无解逻辑) ---
             if sol_config['type'] == 'subject_balanced':
                 enrollment = calculate_subject_enrollment(st.session_state['packages'])
                 max_students = max(enrollment.values()) if enrollment else 0
-                
-                # 方案 C 的硬性门槛
                 scheme_c_limit = 24
                 
-                # 计算“理论最低需求”
-                # 例如：73 人 / 24 = 3.04 -> 需要 4 个班
+                # [特权 A] 自动按需扩容班数
                 theoretical_needed = math.ceil(max_students / scheme_c_limit)
-                
-                # 🔥 核心修改：取“用户设置”和“最低需求”的较大值
-                # 绝不额外多加，也不搞硬保底
                 current_user_setting = run_config['max_classes_per_subject']
+                # 取较大值：既满足理论需求，又不小于用户设置
                 new_limit = max(current_user_setting, theoretical_needed)
-                
                 run_config['max_classes_per_subject'] = int(new_limit)
                 
-                # 只有当确实发生了扩容时，才提示用户
+                # [特权 B] 自动降低最小班额 (关键！)
+                # 如果用户设置最小班额为 30，而方案C强制最大24，会无解。
+                # 所以强制将方案C的最小班额限制在 24 以下 (例如 20 或更小)
+                if run_config['min_class_size'] > scheme_c_limit:
+                    # 如果最小班额太大，强制降为 1 (或者一个合理的小值)
+                    run_config['min_class_size'] = 1 
+                
+                # 提示用户
+                msgs = []
                 if new_limit > current_user_setting:
-                    status_text.markdown(f"🔓 **{sol_config['name']}** - 因人数限制，班数上限临时调整为 {new_limit} 个...")
+                    msgs.append(f"班数上限↗{new_limit}")
+                if config['min_class_size'] > scheme_c_limit:
+                    msgs.append(f"最小班额↘1")
+                
+                if msgs:
+                    status_text.markdown(f"🔓 **{sol_config['name']}** - 自动调整参数: {', '.join(msgs)}")
                     time.sleep(0.5)
 
-            # 3. 实例化求解器
+            # --- 3. 实例化求解器 (使用 run_config) ---
             solver_instance = ScheduleSolver(
                 st.session_state['packages'],
                 st.session_state['subject_hours'],
-                run_config
+                run_config 
             )
 
-            # ... (后续代码完全不用动：current_step += 1 ... solve ...)
+            # --- 4. 标准求解流程 (保持不变) ---
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
@@ -1397,7 +1406,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
-            
             status_text.markdown(f"⚙️ **{sol_config['name']}** - 启动求解引擎...")
             percentage_text.markdown(f"**{int(progress * 100)}%**")
             
