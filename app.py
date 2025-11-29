@@ -428,22 +428,25 @@ class ScheduleSolver:
 
         elif objective_type == 'subject_balanced':
             # ==============================================================================
-            # [方案C - 精品小班版] 
-            # 特性1: 绝对禁止误差超过 4 人 (核弹级惩罚)
-            # 特性2: [新增] 单班上限强制锁定 24 人
+            # [方案C - 最终完美版] 
+            # 策略：按人头定最少班数 -> 然后平均分配 -> 允许最大误差 6 人
             # ==============================================================================
             
             total_excess_penalty = 0 
             total_raw_penalty = 0    
             
-            # 默认允许 4 人误差
-            allowed_gap = self.config.get('balance_tolerance', 7)
+            # 🔥 配置 1: 允许误差固定为 6
+            # 这意味着：如果最大班 20 人，最小班 14 人 (差6)，是被允许的。
+            # 如果差 7 人，就会受到核弹级惩罚。
+            allowed_gap = 6
             
-            # [新增] 方案C 专用的硬性班额上限
+            # 🔥 配置 2: 单班硬上限 (例如 24 人)
+            # 这决定了“最少需要开几个班”。
+            # 例如 50 人 / 24 = 2.08 -> 必须开 3 个班。
             scheme_c_max_size = 24
 
             for k in self.subjects:
-                # 辅助变量定义
+                # 辅助变量
                 k_effective_sizes_max = [] 
                 k_effective_sizes_min = [] 
                 
@@ -459,12 +462,10 @@ class ScheduleSolver:
                         for p in self.package_names
                     )
                     
-                    # 🔥🔥🔥 [核心修改] 强制限制：方案C 最大班额不得超过 24 人 🔥🔥🔥
-                    # 无论全局最大班额设置多少，方案C必须遵守这个更严格的限制
-                    # 注意：如果 u_r[(k, r)] 为 0 (不开班)，actual_size 自动为 0，也满足 <= 24
+                    # 1. 强制单班上限 (这是计算“最少班数”的基础)
                     model.Add(actual_size <= scheme_c_max_size)
 
-                    # Max/Min 辅助变量计算 (保持不变)
+                    # Max/Min 辅助计算 (保持不变)
                     eff_max = model.NewIntVar(0, 200, f'eff_max_C_{k}_{r}')
                     model.Add(eff_max == actual_size).OnlyEnforceIf(u_r[(k, r)])
                     model.Add(eff_max == 0).OnlyEnforceIf(u_r[(k, r)].Not())
@@ -475,7 +476,7 @@ class ScheduleSolver:
                     model.Add(eff_min == 200).OnlyEnforceIf(u_r[(k, r)].Not())
                     k_effective_sizes_min.append(eff_min)
                 
-                # 科目极差计算 (保持不变)
+                # 计算极差
                 k_max_size = model.NewIntVar(0, 200, f'k_max_C_{k}')
                 k_min_size = model.NewIntVar(0, 200, f'k_min_C_{k}')
                 model.AddMaxEquality(k_max_size, k_effective_sizes_max)
@@ -485,7 +486,7 @@ class ScheduleSolver:
                 model.Add(k_range == k_max_size - k_min_size).OnlyEnforceIf(subject_active)
                 model.Add(k_range == 0).OnlyEnforceIf(subject_active.Not())
                 
-                # 超标误差计算 (保持不变)
+                # 计算“超标误差” (超过 6 的部分)
                 k_excess = model.NewIntVar(0, 200, f'excess_C_{k}')
                 model.Add(k_excess >= k_range - allowed_gap).OnlyEnforceIf(subject_active)
                 model.Add(k_excess >= 0)
@@ -493,14 +494,28 @@ class ScheduleSolver:
                 total_excess_penalty += k_excess
                 total_raw_penalty += k_range
 
-            # --- 权重配置 (保持核弹级严厉) ---
-            weight_class_reward = 500000  # 鼓励拆班
-            weight_excess = 1000000       # 严禁误差超标
-            weight_raw = 50              # 引导微调
+            # --- 🔥 权重金字塔 (决定谁听谁的) ---
+            
+            # 第一层级：开班惩罚 (50万)
+            # 作用：只要能少开一个班，绝对少开。
+            # 比如 50 人，开 3 个班(每班17) vs 开 4 个班(每班12.5)。
+            # 开 3 个班罚 150万，开 4 个班罚 200万。-> 必选 3 个班。
+            weight_class_penalty = 500000  
+            
+            # 第二层级：超标惩罚 (100万 - 红线)
+            # 作用：虽然我选了 3 个班，但如果分成了 24, 24, 2 (极差22 > 6)，
+            # 罚分 16 * 100万 = 1600万。-> 这种方案会被枪毙。
+            # 逼迫求解器去找 17, 17, 16 这种方案。
+            weight_excess = 1000000 
+            
+            # 第三层级：原始均衡 (50 - 微调)
+            # 作用：在都不超标的情况下，选那个更平均的。
+            weight_raw = 50
+            
             weight_split = self.config.get('slot_split_penalty', 1000)
             
             model.Minimize(
-                total_classes * weight_class_reward + 
+                total_classes * weight_class_penalty + 
                 total_excess_penalty * weight_excess + 
                 total_raw_penalty * weight_raw + 
                 slot_split_penalty * (weight_split / 100) + 
