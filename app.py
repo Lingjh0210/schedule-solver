@@ -1006,11 +1006,11 @@ def on_max_classes_change():
 # ==============================================================================
 # [新增功能] 方案D专用：智能拆分工具
 # ==============================================================================
+# ==============================================================================
+# [修改] 智能拆分函数 (使用 A/B/C 命名)
+# ==============================================================================
 def preprocess_and_split_packages(original_packages, max_class_size=24):
-    """
-    自动拆分超大配套
-    返回: (新配套字典, 拆分日志列表)
-    """
+    """自动拆分超大配套 (命名优化版)"""
     import math
     new_packages = {}
     split_log = []
@@ -1018,16 +1018,12 @@ def preprocess_and_split_packages(original_packages, max_class_size=24):
     for pkg_name, pkg_data in original_packages.items():
         count = pkg_data['人数']
         
-        # 如果人数 <= 上限，直接保留
         if count <= max_class_size:
             new_packages[pkg_name] = pkg_data
             continue
             
         # === 需要拆分 ===
-        # 计算拆分份数
         num_chunks = math.ceil(count / max_class_size)
-        
-        # 均匀分配人数
         base_size = count // num_chunks
         remainder = count % num_chunks
         
@@ -1036,21 +1032,52 @@ def preprocess_and_split_packages(original_packages, max_class_size=24):
             size = base_size + (1 if i < remainder else 0)
             chunks.append(size)
             
-        # 生成拆分后的配套
         log_entry = {'original': pkg_name, 'total': count, 'parts': []}
         
         for idx, size in enumerate(chunks):
-            sub_name = f"{pkg_name}_{idx+1}" # 例如 P1_1, P1_2
+            # 🔥 修改点：使用 A, B, C... 后缀
+            suffix = chr(65 + idx) # 0->A, 1->B
+            sub_name = f"{pkg_name}_{suffix}" 
+            
             new_packages[sub_name] = {
                 '人数': size,
-                '科目': pkg_data['科目'] # 继承科目需求
+                '科目': pkg_data['科目'] 
             }
             log_entry['parts'].append(f"{sub_name}({size}人)")
             
         split_log.append(log_entry)
         
     return new_packages, split_log
-
+    
+def analyze_teacher_needs(slot_schedule):
+    """
+    分析师资需求：计算每个科目需要的最小教师数量（即最大并发数）
+    """
+    from collections import defaultdict
+    
+    # 1. 统计每个科目总共开了多少班
+    # (这个其实在 class_details 里有，但这里主要算并发)
+    
+    # 2. 计算最大并发数 (Max Concurrency)
+    # 逻辑：遍历每个时间段，数一数每个科目出现了几次
+    teacher_needs = defaultdict(int)
+    
+    for slot_data in slot_schedule:
+        # slot_data['display_items'] 包含了该时间段内所有的课
+        current_slot_counts = defaultdict(int)
+        
+        for item in slot_data.get('display_items', []):
+            if not item.get('is_gap', False):
+                subj = item['subject']
+                current_slot_counts[subj] += 1
+        
+        # 更新该科目的历史最高记录
+        for subj, count in current_slot_counts.items():
+            if count > teacher_needs[subj]:
+                teacher_needs[subj] = count
+                
+    return teacher_needs
+    
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
@@ -1620,19 +1647,48 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         # Details
         for sol in st.session_state['solutions']:
             with st.expander(f"📋 {sol['name']} - 详细结果"):
-                if 'split_log' in sol:
-                    st.info("💡 **自动拆分报告**：为了满足人数上限，以下配套已被自动拆分为更小的单元")
-                    split_data = []
-                    for log in sol['split_log']:
-                        split_data.append({
-                            '原配套': log['original'],
-                            '总人数': log['total'],
-                            '拆分详情': ' + '.join(log['parts']),
-                            '拆分份数': len(log['parts'])
-                        })
-                    st.dataframe(pd.DataFrame(split_data), use_container_width=True)
-                    st.markdown("---")
-                tab1, tab2, tab3 = st.tabs(["开班详情", "时段总表", "数据导出"])
+                # ... (在 with st.expander(...) 内部) ...
+
+            # 1. 显示拆分日志 (A/B/C 风格)
+            if 'split_log' in sol:
+                st.info("✂️ **自动拆分方案**：以下大配套已被拆分为 A/B 班")
+                split_data = []
+                for log in sol['split_log']:
+                    split_data.append({
+                        '原配套': log['original'],
+                        '总人数': log['total'],
+                        '拆分结果': ' + '.join(log['parts']), # 例如 P1_A(12人) + P1_B(13人)
+                        '班数': len(log['parts'])
+                    })
+                st.dataframe(pd.DataFrame(split_data), use_container_width=True)
+            
+            # 2. [新增] 师资与开班统计 (方案D专属优化)
+            if sol['name'].startswith('方案D') and sol['status'] == 'success':
+                st.markdown("##### 👨‍🏫 师资与开班统计")
+                teacher_needs = analyze_teacher_needs(sol['slot_schedule'])
+                
+                # 整理数据
+                stats_data = []
+                # 从 analysis 获取总班数信息 (如果 solver.analyze_solution 返回了 breakdown 更好，这里我们重新统计一下)
+                total_classes_map = defaultdict(int)
+                for item in sol['class_details']:
+                    total_classes_map[item['科目']] += 1
+                
+                for subj in sorted(total_classes_map.keys()):
+                    stats_data.append({
+                        '科目': subj,
+                        '总开班数': total_classes_map[subj], # 这学期一共开了几个班
+                        '所需老师(并发数)': teacher_needs.get(subj, 1), # 同一时间最多几个班上课
+                        '单班平均': f"{round(sum(c['人数'] for c in sol['class_details'] if c['科目']==subj)/total_classes_map[subj], 1)}人"
+                    })
+                
+                st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
+
+            st.markdown("---")
+
+            # 3. 原有的 Tab 展示 (保持不变)
+            tab1, tab2, tab3 = st.tabs(["开班详情", "时段总表", "数据导出"])
+            # ... (后面的代码不需要动) ...
                 
                 with tab1:
                     df_class = pd.DataFrame(sol['class_details'])
