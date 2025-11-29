@@ -428,32 +428,49 @@ class ScheduleSolver:
 
         elif objective_type == 'subject_balanced':
             # ==============================================================================
-            # [方案C - 最终完美版] 
-            # 策略：按人头定最少班数 -> 然后平均分配 -> 允许最大误差 6 人
+            # [方案C - 绝对锁定版] 
+            # 1. 独立规则：无视外部参数
+            # 2. 单班上限：30人
+            # 3. 开班数量：强制锁定为 (总人数/30) 向上取整，绝不多开一个
             # ==============================================================================
+            import math 
             
             total_excess_penalty = 0 
             total_raw_penalty = 0    
             
-            # 🔥 配置 1: 允许误差固定为 6
-            # 这意味着：如果最大班 20 人，最小班 14 人 (差6)，是被允许的。
-            # 如果差 7 人，就会受到核弹级惩罚。
-            allowed_gap = 6
-            
-            # 🔥 配置 2: 单班硬上限 (例如 24 人)
-            # 这决定了“最少需要开几个班”。
-            # 例如 50 人 / 24 = 2.08 -> 必须开 3 个班。
-            scheme_c_max_size = 30
+            # 内部死规则配置
+            allowed_gap = 6      # 允许误差
+            scheme_c_max_size = 30  # 单班上限
 
             for k in self.subjects:
-                # 辅助变量
+                # --- 🔥 核心新增：计算并锁定该科目的最大开班数 ---
+                # 获取该科目总人数
+                total_k_students = self.subject_enrollment.get(k, 0)
+                
+                # 计算理论最少班数 (例如 80/30 = 2.66 -> 3)
+                # 如果人数为0，则为0
+                if total_k_students > 0:
+                    locked_class_count = math.ceil(total_k_students / scheme_c_max_size)
+                else:
+                    locked_class_count = 0
+                
+                # 获取实际使用的开班变量之和
+                # sum(u_r) 就是求解器决定开几个班
+                active_classes_var = sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1))
+                
+                # 🔥 添加硬约束：开班数必须 <= 理论最少班数
+                # (因为物理上也不可能小于这个数，所以这就等于强制锁定为这个数)
+                model.Add(active_classes_var <= locked_class_count)
+                
+                # ---------------------------------------------------------
+
+                # 辅助变量定义 (保持不变)
                 k_effective_sizes_max = [] 
                 k_effective_sizes_min = [] 
                 
                 subject_active = model.NewBoolVar(f'active_subj_{k}')
-                class_count = sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1))
-                model.Add(class_count >= 1).OnlyEnforceIf(subject_active)
-                model.Add(class_count == 0).OnlyEnforceIf(subject_active.Not())
+                model.Add(active_classes_var >= 1).OnlyEnforceIf(subject_active)
+                model.Add(active_classes_var == 0).OnlyEnforceIf(subject_active.Not())
 
                 for r in range(1, self.config['max_classes_per_subject'] + 1):
                     # 计算班级 r 的实际人数
@@ -462,10 +479,10 @@ class ScheduleSolver:
                         for p in self.package_names
                     )
                     
-                    # 1. 强制单班上限 (这是计算“最少班数”的基础)
+                    # 强制单班上限
                     model.Add(actual_size <= scheme_c_max_size)
 
-                    # Max/Min 辅助计算 (保持不变)
+                    # Max/Min 辅助计算
                     eff_max = model.NewIntVar(0, 200, f'eff_max_C_{k}_{r}')
                     model.Add(eff_max == actual_size).OnlyEnforceIf(u_r[(k, r)])
                     model.Add(eff_max == 0).OnlyEnforceIf(u_r[(k, r)].Not())
@@ -476,7 +493,7 @@ class ScheduleSolver:
                     model.Add(eff_min == 200).OnlyEnforceIf(u_r[(k, r)].Not())
                     k_effective_sizes_min.append(eff_min)
                 
-                # 计算极差
+                # 极差计算
                 k_max_size = model.NewIntVar(0, 200, f'k_max_C_{k}')
                 k_min_size = model.NewIntVar(0, 200, f'k_min_C_{k}')
                 model.AddMaxEquality(k_max_size, k_effective_sizes_max)
@@ -486,7 +503,7 @@ class ScheduleSolver:
                 model.Add(k_range == k_max_size - k_min_size).OnlyEnforceIf(subject_active)
                 model.Add(k_range == 0).OnlyEnforceIf(subject_active.Not())
                 
-                # 计算“超标误差” (超过 6 的部分)
+                # 误差计算
                 k_excess = model.NewIntVar(0, 200, f'excess_C_{k}')
                 model.Add(k_excess >= k_range - allowed_gap).OnlyEnforceIf(subject_active)
                 model.Add(k_excess >= 0)
@@ -494,28 +511,17 @@ class ScheduleSolver:
                 total_excess_penalty += k_excess
                 total_raw_penalty += k_range
 
-            # --- 🔥 权重金字塔 (决定谁听谁的) ---
+            # --- 权重配置 ---
+            # 由于班数已经被硬约束锁死了，这里的开班惩罚其实已经不起作用了。
+            # 我们只需要关注均衡即可。
             
-            # 第一层级：开班惩罚 (50万)
-            # 作用：只要能少开一个班，绝对少开。
-            # 比如 50 人，开 3 个班(每班17) vs 开 4 个班(每班12.5)。
-            # 开 3 个班罚 150万，开 4 个班罚 200万。-> 必选 3 个班。
-            weight_class_penalty = 500000  
-            
-            # 第二层级：超标惩罚 (100万 - 红线)
-            # 作用：虽然我选了 3 个班，但如果分成了 24, 24, 2 (极差22 > 6)，
-            # 罚分 16 * 100万 = 1600万。-> 这种方案会被枪毙。
-            # 逼迫求解器去找 17, 17, 16 这种方案。
-            weight_excess = 1000000 
-            
-            # 第三层级：原始均衡 (50 - 微调)
-            # 作用：在都不超标的情况下，选那个更平均的。
-            weight_raw = 50
+            weight_class_penalty = 0      # 班数已锁死，无需惩罚
+            weight_excess = 1000000       # 严禁误差超标
+            weight_raw = 100              # 尽量平均
             
             weight_split = self.config.get('slot_split_penalty', 1000)
             
             model.Minimize(
-                total_classes * weight_class_penalty + 
                 total_excess_penalty * weight_excess + 
                 total_raw_penalty * weight_raw + 
                 slot_split_penalty * (weight_split / 100) + 
@@ -1362,48 +1368,48 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         total_steps = len(solution_configs) * 3 
         current_step = 0
         
-        import math # 防止报错
-
         # ==============================================================================
         # [Step 2] 循环求解每个方案
         # ==============================================================================
+        import math # 确保导入
+
         for i, sol_config in enumerate(solution_configs):
             
-            # --- 1. 拷贝当前配置 ---
+            # 1. 拷贝当前配置
             run_config = config.copy()
             
-            # --- 2. 针对方案 C 的“特权处理” (防无解逻辑) ---
+            # 2. 针对方案 C 的“完全独立化处理”
             if sol_config['type'] == 'subject_balanced':
+                # --- 彻底无视用户参数，重写规则 ---
+                
+                # 获取全校人数最多的科目人数
                 enrollment = calculate_subject_enrollment(st.session_state['packages'])
                 max_students = max(enrollment.values()) if enrollment else 0
+                
+                # 内部死规则：上限 30
                 scheme_c_limit = 30
                 
-                # [特权 A] 自动按需扩容班数
+                # 计算理论最少需要几个班
+                # 例如 75 人 / 30 = 2.5 -> 需要 3 个班
                 theoretical_needed = math.ceil(max_students / scheme_c_limit)
-                current_user_setting = run_config['max_classes_per_subject']
-                # 取较大值：既满足理论需求，又不小于用户设置
-                new_limit = max(current_user_setting, theoretical_needed)
-                run_config['max_classes_per_subject'] = int(new_limit)
                 
-                # [特权 B] 自动降低最小班额 (关键！)
-                # 如果用户设置最小班额为 30，而方案C强制最大24，会无解。
-                # 所以强制将方案C的最小班额限制在 24 以下 (例如 20 或更小)
-                if run_config['min_class_size'] > scheme_c_limit:
-                    # 如果最小班额太大，强制降为 1 (或者一个合理的小值)
-                    run_config['min_class_size'] = 1 
+                # 🔥 强制重写【最大班数】：
+                # 给予“理论需求 + 2”的开班权限。
+                # 比如理论要3个，我们给5个变量空间。
+                # 我们完全不看用户在侧边栏设了多少(哪怕用户设了1，这里也强制改成5)
+                run_config['max_classes_per_subject'] = int(theoretical_needed + 2)
                 
-                # 提示用户
-                msgs = []
-                if new_limit > current_user_setting:
-                    msgs.append(f"班数上限↗{new_limit}")
-                if config['min_class_size'] > scheme_c_limit:
-                    msgs.append(f"最小班额↘1")
+                # 🔥 强制重写【最小班额】：
+                # 直接设为 1。
+                # 既然方案C有高额的开班惩罚(50万)，它绝不会乱开只有1个人的班。
+                # 设置为1是为了防止用户在侧边栏设了 35，导致数学上无解。
+                run_config['min_class_size'] = 1
                 
-                if msgs:
-                    status_text.markdown(f"🔓 **{sol_config['name']}** - 自动调整参数: {', '.join(msgs)}")
-                    time.sleep(0.5)
+                # 提示用户（明确告知这是独立计算的）
+                status_text.markdown(f"🔓 **{sol_config['name']}** - 已启用独立规则 (忽略全局参数，自动计算班数...)")
+                time.sleep(0.5)
 
-            # --- 3. 实例化求解器 (使用 run_config) ---
+            # 3. 实例化求解器 (使用 run_config)
             solver_instance = ScheduleSolver(
                 st.session_state['packages'],
                 st.session_state['subject_hours'],
@@ -1444,9 +1450,10 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 result['analysis'] = solver_instance.analyze_solution(result)
                 result['class_details'], result['slot_schedule'] = solver_instance.extract_timetable(result)
                 solutions.append(result)
-                status_text.markdown(f"✅ **{sol_config['name']}** - 求解完成 (耗时 {result['solve_time']:.2f}s)")
+                status_text.markdown(f"✅ **{sol_config['name']}** - 求解完成")
             else:
                 status_text.markdown(f"❌ **{sol_config['name']}** - 求解失败")
+                time.sleep(1)
         
         progress_bar.progress(1.0)
         percentage_text.markdown("**100%**")
