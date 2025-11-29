@@ -906,7 +906,14 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
 
     # 1. 最小班额 (保持不变)
     min_student_count = min(enrollment.values())
-    suggested_min_size = min(5, min_student_count)
+    
+    # 你的逻辑：最小人数 - 3 (且至少为1，防止负数)
+    calculated_min = max(1, min_student_count - 3)
+    
+    # 🔥 建议增加：安全封顶 (比如 15)
+    # 解释：如果最少科目都有 40 人，算出 37 人作为底线太高了，会导致其他大课无法拆分成小班。
+    # 所以我们取两者的较小值：min(15, 计算值)
+    suggested_min_size = min(15, calculated_min)
 
     # 2. 最大班额 (修正：去掉 max(40) 的硬限制)
     max_student_count = max(enrollment.values())
