@@ -323,9 +323,19 @@ class ScheduleSolver:
                             for k in self.subjects 
                             for r in range(1, self.config['max_classes_per_subject'] + 1)) <= 1)
         
+        # 找到 build_model 方法中约 200 行左右的位置
+        # 替换原有的 sum(...) <= 1 的循环
+
         for k in self.subjects:
             for t in self.TIME_SLOTS_1H:
-                model.Add(sum(y_rt[(k, r, t)] for r in range(1, self.config['max_classes_per_subject'] + 1)) <= 1)
+                # [默认逻辑] 方案A/B/C: limit = 1 (单教师)
+                limit = 1
+                
+                # [特权逻辑] 方案D: 如果开启并发，limit = 最大班数 (多教师)
+                if self.config.get('enable_concurrency', False):
+                    limit = self.config['max_classes_per_subject']
+                
+                model.Add(sum(y_rt[(k, r, t)] for r in range(1, self.config['max_classes_per_subject'] + 1)) <= limit)
         
         for p in self.package_names:
             for k in self.subjects:
@@ -1468,6 +1478,8 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 run_config['max_classes_per_subject'] = int(theoretical_needed + 2)
                 run_config['min_class_size'] = 1
                 run_config['dynamic_max_limit'] = scheme_d_limit # 传递给 Solver
+                # [新增] 仅为方案D 颁发特许通行证
+                run_config['enable_concurrency'] = True
 
             # === (原有的方案C逻辑不需要动，只要确保它在 elif 里即可) ===
             elif sol_config['type'] == 'subject_balanced':
