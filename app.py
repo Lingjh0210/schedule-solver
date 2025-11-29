@@ -1650,41 +1650,41 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 # ... (在 with st.expander(...) 内部) ...
 
             # 1. 显示拆分日志 (A/B/C 风格)
-            if 'split_log' in sol:
-                st.info("✂️ **自动拆分方案**：以下大配套已被拆分为 A/B 班")
-                split_data = []
-                for log in sol['split_log']:
-                    split_data.append({
-                        '原配套': log['original'],
-                        '总人数': log['total'],
-                        '拆分结果': ' + '.join(log['parts']), # 例如 P1_A(12人) + P1_B(13人)
-                        '班数': len(log['parts'])
-                    })
-                st.dataframe(pd.DataFrame(split_data), use_container_width=True)
-            
-            # 2. [新增] 师资与开班统计 (方案D专属优化)
-            if sol['name'].startswith('方案D') and sol['status'] == 'success':
-                st.markdown("##### 👨‍🏫 师资与开班统计")
-                teacher_needs = analyze_teacher_needs(sol['slot_schedule'])
+                if 'split_log' in sol:
+                    st.info("✂️ **自动拆分方案**：以下大配套已被拆分为 A/B 班")
+                    split_data = []
+                    for log in sol['split_log']:
+                        split_data.append({
+                            '原配套': log['original'],
+                            '总人数': log['total'],
+                            '拆分结果': ' + '.join(log['parts']), # 例如 P1_A(12人) + P1_B(13人)
+                            '班数': len(log['parts'])
+                        })
+                    st.dataframe(pd.DataFrame(split_data), use_container_width=True)
                 
-                # 整理数据
-                stats_data = []
-                # 从 analysis 获取总班数信息 (如果 solver.analyze_solution 返回了 breakdown 更好，这里我们重新统计一下)
-                total_classes_map = defaultdict(int)
-                for item in sol['class_details']:
-                    total_classes_map[item['科目']] += 1
-                
-                for subj in sorted(total_classes_map.keys()):
-                    stats_data.append({
-                        '科目': subj,
-                        '总开班数': total_classes_map[subj], # 这学期一共开了几个班
-                        '所需老师(并发数)': teacher_needs.get(subj, 1), # 同一时间最多几个班上课
-                        '单班平均': f"{round(sum(c['人数'] for c in sol['class_details'] if c['科目']==subj)/total_classes_map[subj], 1)}人"
-                    })
-                
-                st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
-
-            st.markdown("---")
+                # 2. [新增] 师资与开班统计 (方案D专属优化)
+                if sol['name'].startswith('方案D') and sol['status'] == 'success':
+                    st.markdown("##### 👨‍🏫 师资与开班统计")
+                    teacher_needs = analyze_teacher_needs(sol['slot_schedule'])
+                    
+                    # 整理数据
+                    stats_data = []
+                    # 从 analysis 获取总班数信息 (如果 solver.analyze_solution 返回了 breakdown 更好，这里我们重新统计一下)
+                    total_classes_map = defaultdict(int)
+                    for item in sol['class_details']:
+                        total_classes_map[item['科目']] += 1
+                    
+                    for subj in sorted(total_classes_map.keys()):
+                        stats_data.append({
+                            '科目': subj,
+                            '总开班数': total_classes_map[subj], # 这学期一共开了几个班
+                            '所需老师(并发数)': teacher_needs.get(subj, 1), # 同一时间最多几个班上课
+                            '单班平均': f"{round(sum(c['人数'] for c in sol['class_details'] if c['科目']==subj)/total_classes_map[subj], 1)}人"
+                        })
+                    
+                    st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
+    
+                st.markdown("---")
 
             # 3. 原有的 Tab 展示 (保持不变)
             tab1, tab2, tab3 = st.tabs(["开班详情", "时段总表", "数据导出"])
