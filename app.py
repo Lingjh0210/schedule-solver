@@ -443,7 +443,7 @@ class ScheduleSolver:
             # 🔥 配置 2: 单班硬上限 (例如 24 人)
             # 这决定了“最少需要开几个班”。
             # 例如 50 人 / 24 = 2.08 -> 必须开 3 个班。
-            scheme_c_max_size = 24
+            scheme_c_max_size = 30
 
             for k in self.subjects:
                 # 辅助变量
@@ -1369,7 +1369,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             if sol_config['type'] == 'subject_balanced':
                 enrollment = calculate_subject_enrollment(st.session_state['packages'])
                 max_students = max(enrollment.values()) if enrollment else 0
-                scheme_c_limit = 24
+                scheme_c_limit = 30
                 
                 # [特权 A] 自动按需扩容班数
                 theoretical_needed = math.ceil(max_students / scheme_c_limit)
