@@ -440,7 +440,8 @@ class ScheduleSolver:
             
             # 内部死规则配置
             allowed_gap = 6      # 允许误差
-            scheme_c_max_size = 30  # 单班上限
+            # [修改] 优先读取动态配置，如果没有则默认为 30 (兼容旧方案)
+            scheme_c_max_size = self.config.get('dynamic_max_limit', 30)
 
             for k in self.subjects:
                 # --- 🔥 核心新增：计算并锁定该科目的最大开班数 ---
@@ -995,6 +996,54 @@ def on_max_classes_change():
     # 5. (可选) 给个提示
     st.toast(f"已根据 {current_max_classes} 个班重新计算，最大班额调整为 {suggested_new_size} 人", icon="🔄")
 
+# ==============================================================================
+# [新增功能] 方案D专用：智能拆分工具
+# ==============================================================================
+def preprocess_and_split_packages(original_packages, max_class_size=24):
+    """
+    自动拆分超大配套
+    返回: (新配套字典, 拆分日志列表)
+    """
+    import math
+    new_packages = {}
+    split_log = []
+    
+    for pkg_name, pkg_data in original_packages.items():
+        count = pkg_data['人数']
+        
+        # 如果人数 <= 上限，直接保留
+        if count <= max_class_size:
+            new_packages[pkg_name] = pkg_data
+            continue
+            
+        # === 需要拆分 ===
+        # 计算拆分份数
+        num_chunks = math.ceil(count / max_class_size)
+        
+        # 均匀分配人数
+        base_size = count // num_chunks
+        remainder = count % num_chunks
+        
+        chunks = []
+        for i in range(num_chunks):
+            size = base_size + (1 if i < remainder else 0)
+            chunks.append(size)
+            
+        # 生成拆分后的配套
+        log_entry = {'original': pkg_name, 'total': count, 'parts': []}
+        
+        for idx, size in enumerate(chunks):
+            sub_name = f"{pkg_name}_{idx+1}" # 例如 P1_1, P1_2
+            new_packages[sub_name] = {
+                '人数': size,
+                '科目': pkg_data['科目'] # 继承科目需求
+            }
+            log_entry['parts'].append(f"{sub_name}({size}人)")
+            
+        split_log.append(log_entry)
+        
+    return new_packages, split_log
+
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
@@ -1202,6 +1251,14 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             slot_split_penalty = 0
         
         st.markdown("---")
+
+        st.markdown("##### ✂️ 方案D配置")
+        scheme_d_limit = st.number_input(
+            "方案D自动拆分上限", 
+            min_value=10, max_value=100, value=24, step=1,
+            help="当配套人数超过此数值时，自动拆分为多个小配套（方案D专用）"
+        )
+        st.markdown("---")
         
         st.subheader("🔒 强制开班")
         if 'subject_hours' in st.session_state:
@@ -1348,10 +1405,12 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         # ==============================================================================
         # [Step 1] 定义求解方案列表 (确保这里有3个方案)
         # ==============================================================================
+        # 在 solution_configs 列表中增加一行：
         solution_configs = [
             {'type': 'min_classes', 'name': '方案A：最少开班'},
             {'type': 'balanced', 'name': '方案B：全局均衡'},
-            {'type': 'subject_balanced', 'name': '方案C：精品小班(上限24人)'}
+            {'type': 'subject_balanced', 'name': '方案C：精品小班(上限30人)'},
+            {'type': 'auto_split', 'name': f'方案D：自动拆分(上限{scheme_d_limit}人)'} 
         ]
         
         # 进度条初始化
@@ -1377,6 +1436,52 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             
             # 1. 拷贝当前配置
             run_config = config.copy()
+            # ... (在 run_config = config.copy() 之后插入) ...
+
+            # 默认使用原始数据
+            current_packages = st.session_state['packages']
+            split_info = None # 用于记录拆分日志
+
+            # === [新增] 方案D 处理逻辑 ===
+            if sol_config['type'] == 'auto_split':
+                # 1. 执行拆分
+                new_pkgs, logs = preprocess_and_split_packages(
+                    st.session_state['packages'], 
+                    max_class_size=scheme_d_limit
+                )
+                current_packages = new_pkgs # 切换为拆分后的数据
+                split_info = logs
+                
+                if logs:
+                    status_text.markdown(f"✂️ **{sol_config['name']}** - 已拆分 {len(logs)} 个超大配套...")
+                    time.sleep(0.5)
+                
+                # 2. 借用方案C的内核，但使用方案D的参数
+                sol_config['type'] = 'subject_balanced' 
+                
+                # 3. 强制覆盖参数 (保证有解)
+                enrollment = calculate_subject_enrollment(current_packages)
+                max_students = max(enrollment.values()) if enrollment else 0
+                import math
+                theoretical_needed = math.ceil(max_students / scheme_d_limit)
+                
+                run_config['max_classes_per_subject'] = int(theoretical_needed + 2)
+                run_config['min_class_size'] = 1
+                run_config['dynamic_max_limit'] = scheme_d_limit # 传递给 Solver
+
+            # === (原有的方案C逻辑不需要动，只要确保它在 elif 里即可) ===
+            elif sol_config['type'] == 'subject_balanced':
+                # ... (你原来的代码) ...
+            
+            # ...
+            
+            # [关键修改] 实例化 Solver 时，务必传入 current_packages
+            # 原来是 st.session_state['packages']，现在要改成 current_packages
+            solver_instance = ScheduleSolver(
+                current_packages, # <--- 改这里，支持方案D的拆分数据
+                st.session_state['subject_hours'],
+                run_config
+            )
             
             # 2. 针对方案 C 的“完全独立化处理”
             if sol_config['type'] == 'subject_balanced':
@@ -1512,6 +1617,18 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         # Details
         for sol in st.session_state['solutions']:
             with st.expander(f"📋 {sol['name']} - 详细结果"):
+                if 'split_log' in sol:
+                    st.info("💡 **自动拆分报告**：为了满足人数上限，以下配套已被自动拆分为更小的单元")
+                    split_data = []
+                    for log in sol['split_log']:
+                        split_data.append({
+                            '原配套': log['original'],
+                            '总人数': log['total'],
+                            '拆分详情': ' + '.join(log['parts']),
+                            '拆分份数': len(log['parts'])
+                        })
+                    st.dataframe(pd.DataFrame(split_data), use_container_width=True)
+                    st.markdown("---")
                 tab1, tab2, tab3 = st.tabs(["开班详情", "时段总表", "数据导出"])
                 
                 with tab1:
