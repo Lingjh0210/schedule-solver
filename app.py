@@ -453,25 +453,22 @@ class ScheduleSolver:
             # [修改] 优先读取动态配置，如果没有则默认为 30 (兼容旧方案)
             scheme_c_max_size = self.config.get('dynamic_max_limit', 30)
 
+
             for k in self.subjects:
-                # --- 🔥 核心新增：计算并锁定该科目的最大开班数 ---
-                # 获取该科目总人数
+                # 1. 计算理论硬锁定数
                 total_k_students = self.subject_enrollment.get(k, 0)
-                
-                # 计算理论最少班数 (例如 80/30 = 2.66 -> 3)
-                # 如果人数为0，则为0
                 if total_k_students > 0:
                     locked_class_count = math.ceil(total_k_students / scheme_c_max_size)
                 else:
                     locked_class_count = 0
                 
-                # 获取实际使用的开班变量之和
-                # sum(u_r) 就是求解器决定开几个班
                 active_classes_var = sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1))
                 
-                # 🔥 添加硬约束：开班数必须 <= 理论最少班数
-                # (因为物理上也不可能小于这个数，所以这就等于强制锁定为这个数)
-                model.Add(active_classes_var <= locked_class_count)
+                # 🔥🔥🔥 [核心修改]：松绑逻辑 🔥🔥🔥
+                # 如果配置里要求松绑 (relax_hard_lock=True)，就不加这个硬约束。
+                # 让 50万 的开班罚分去自动控制班数，而不是数学公式强制锁死。
+                if not self.config.get('relax_hard_lock', False):
+                    model.Add(active_classes_var <= locked_class_count)
                 
                 # ---------------------------------------------------------
 
@@ -1475,11 +1472,19 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 import math
                 theoretical_needed = math.ceil(max_students / scheme_d_limit)
                 
+                # 班数给够
                 run_config['max_classes_per_subject'] = int(theoretical_needed + 2)
                 run_config['min_class_size'] = 1
-                run_config['dynamic_max_limit'] = scheme_d_limit # 传递给 Solver
-                # [新增] 仅为方案D 颁发特许通行证
-                run_config['enable_concurrency'] = True
+                run_config['dynamic_max_limit'] = scheme_d_limit
+                run_config['forced_class_count'] = {}
+
+                # 🔥🔥🔥 [关键修改] 开启两大护法 🔥🔥🔥
+                
+                # 护法 1: 开启并发 (允许物理课同时开2个班，解决时间不够)
+                run_config['enable_concurrency'] = True 
+                
+                # 护法 2: 松绑硬锁 (允许为了排开课而多开1个班，解决死锁)
+                run_config['relax_hard_lock'] = True
 
             # === (原有的方案C逻辑不需要动，只要确保它在 elif 里即可) ===
             elif sol_config['type'] == 'subject_balanced':
