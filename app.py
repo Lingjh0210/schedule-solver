@@ -1473,20 +1473,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             elif sol_config['type'] == 'subject_balanced':
                 # ... (你原来的代码) ...
             
-            # ...
-            
-            # [关键修改] 实例化 Solver 时，务必传入 current_packages
-            # 原来是 st.session_state['packages']，现在要改成 current_packages
-            solver_instance = ScheduleSolver(
-                current_packages, # <--- 改这里，支持方案D的拆分数据
-                st.session_state['subject_hours'],
-                run_config
-            )
-            
-            # 2. 针对方案 C 的“完全独立化处理”
-            if sol_config['type'] == 'subject_balanced':
-                # --- 彻底无视用户参数，重写规则 ---
-                
                 # 获取全校人数最多的科目人数
                 enrollment = calculate_subject_enrollment(st.session_state['packages'])
                 max_students = max(enrollment.values()) if enrollment else 0
@@ -1516,9 +1502,9 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
 
             # 3. 实例化求解器 (使用 run_config)
             solver_instance = ScheduleSolver(
-                st.session_state['packages'],
+                current_packages, # <--- 改这里，支持方案D的拆分数据
                 st.session_state['subject_hours'],
-                run_config 
+                run_config
             )
 
             # --- 4. 标准求解流程 (保持不变) ---
