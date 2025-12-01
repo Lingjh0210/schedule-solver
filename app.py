@@ -1731,6 +1731,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         st.info("暂无数据")
                     else:
                         
+                        schedule_data = sol['slot_schedule']
+                    if not schedule_data:
+                        st.info("暂无数据")
+                    else:
+                        # 🔥🔥🔥 [修复版] CSS：完美适配 Light/Dark Mode 🔥🔥🔥
                         table_css = """
                         <style>
                             /* 全局表格样式 */
