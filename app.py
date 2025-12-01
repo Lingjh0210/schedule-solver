@@ -1369,12 +1369,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             config
         )
         
-
-        # Update solution configs to include Scheme C
-        # ==============================================================================
-        # [Step 1] 定义求解方案列表 (确保这里有3个方案)
-        # ==============================================================================
-        # 在 solution_configs 列表中增加一行：
         solution_configs = [
             {'type': 'min_classes', 'name': '方案A：最少开班'},
             {'type': 'balanced', 'name': '方案B：全局均衡'},
@@ -1396,9 +1390,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         total_steps = len(solution_configs) * 3 
         current_step = 0
         
-        # ==============================================================================
-        # [Step 2] 循环求解每个方案
-        # ==============================================================================
         import math # 确保导入
 
         for i, sol_config in enumerate(solution_configs):
@@ -1439,13 +1430,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 run_config['min_class_size'] = 1
                 run_config['dynamic_max_limit'] = scheme_d_limit
                 run_config['forced_class_count'] = {}
-
-                # 🔥🔥🔥 [关键修改] 开启两大护法 🔥🔥🔥
-                
-                # 护法 1: 开启并发 (允许物理课同时开2个班，解决时间不够)
-                run_config['enable_concurrency'] = True 
-                
-                # 护法 2: 松绑硬锁 (允许为了排开课而多开1个班，解决死锁)
+                run_config['enable_concurrency'] = True                
                 run_config['relax_hard_lock'] = True
 
             # === (原有的方案C逻辑不需要动，只要确保它在 elif 里即可) ===
@@ -1458,21 +1443,10 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 
                 # 内部死规则：上限 30
                 scheme_c_limit = 30
-                
-                # 计算理论最少需要几个班
-                # 例如 75 人 / 30 = 2.5 -> 需要 3 个班
+
                 theoretical_needed = math.ceil(max_students / scheme_c_limit)
-                
-                # 🔥 强制重写【最大班数】：
-                # 给予“理论需求 + 2”的开班权限。
-                # 比如理论要3个，我们给5个变量空间。
-                # 我们完全不看用户在侧边栏设了多少(哪怕用户设了1，这里也强制改成5)
                 run_config['max_classes_per_subject'] = int(theoretical_needed + 2)
                 
-                # 🔥 强制重写【最小班额】：
-                # 直接设为 1。
-                # 既然方案C有高额的开班惩罚(50万)，它绝不会乱开只有1个人的班。
-                # 设置为1是为了防止用户在侧边栏设了 35，导致数学上无解。
                 run_config['min_class_size'] = 1
                 
                 # 提示用户（明确告知这是独立计算的）
