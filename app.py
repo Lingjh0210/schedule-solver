@@ -1697,29 +1697,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 row_html += f"<td>{flow_html}</td>"
                                 row_html += f"<td class='col-count'>{item['人数']}</td>"
                                 
-                                # ... (后面的表格逻辑完全不用动，直接复制你原本的即可) ...
-                                # ...
-                                pkg_slots = ["-", "-", "-"]
-                                for d_item in display_items:
-                                    relative_slots = d_item.get('relative_slots', [])
-                                    if not relative_slots and 'start_offset' in d_item:
-                                         try: dur = int(d_item['duration'].replace('h',''))
-                                         except: dur = 1
-                                         start = d_item['start_offset']
-                                         relative_slots = range(start, start + dur)
-                                    pkg_str = d_item.get('packages_str', '-')
-                                    if not pkg_str or d_item.get('is_gap', False): pkg_str = "-"
-                                    for slot_idx in relative_slots:
-                                        if 0 <= slot_idx < 3: pkg_slots[slot_idx] = pkg_str
-                                for grid_idx in range(3):
-                                    row_html += f"<td class='col-pkg'>{pkg_slots[grid_idx]}</td>"
-                                row_html += "</tr>"
-                                html_rows.append(row_html)
-
-                        # 表头结构不变
-                        full_html = f"""{table_css}<table class="schedule-table"><thead><tr><th class="col-slot">时段</th><th class="col-duration">长</th><th>课程流程</th><th class="col-count">数</th><th class="col-pkg">第 1 小时</th><th class="col-pkg">第 2 小时</th><th class="col-pkg">第 3 小时</th></tr></thead><tbody>{''.join(html_rows)}</tbody></table>"""
-                        st.markdown(full_html, unsafe_allow_html=True)
-                                
                                 pkg_slots = ["-", "-", "-"]
                                 
                                 for d_item in display_items:
