@@ -1733,6 +1733,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         
                         table_css = """
                         <style>
+                            /* 全局表格样式 */
                             .schedule-table { 
                                 width: 100%; 
                                 border-collapse: collapse; 
@@ -1740,25 +1741,32 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 margin-bottom: 1rem; 
                                 font-size: 14px; 
                                 table-layout: fixed; 
-                                color: var(--text-color); /* 自动适配文字颜色 */
-                                background-color: var(--background-color); /* 自动适配背景色 */
+                                /* 关键：背景和文字跟随系统 */
+                                background-color: var(--background-color); 
+                                color: var(--text-color);
                             }
+                            
+                            /* 表头样式 */
                             .schedule-table th { 
-                                background-color: var(--secondary-background-color); /* 适配表头背景 */
+                                background-color: var(--secondary-background-color); 
                                 color: var(--text-color); 
                                 padding: 10px 6px; 
                                 text-align: center; 
-                                border-bottom: 2px solid var(--primary-color); /* 使用主题色做底边 */
+                                border-bottom: 2px solid var(--primary-color); /* 主题色底边 */
                                 border-top: 1px solid rgba(128,128,128,0.2); 
                             }
+                            
+                            /* 单元格样式 */
                             .schedule-table td { 
                                 padding: 6px; 
                                 text-align: left; 
                                 border-right: 1px solid rgba(128,128,128,0.1); 
                                 border-bottom: 1px solid rgba(128,128,128,0.1); 
                                 vertical-align: middle; 
+                                color: var(--text-color); /* 强制文字颜色 */
                             }
-                            .group-border-bottom { border-bottom: 2px solid var(--text-color) !important; opacity: 0.3; }
+                            
+                            /* 左侧时段列 */
                             .col-slot { 
                                 width: 50px; 
                                 font-weight: 800; 
@@ -1767,41 +1775,74 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 border-right: 2px solid rgba(128,128,128,0.2) !important; 
                                 text-align: center !important;
                             }
+                            
+                            /* 辅助列 */
                             .col-duration { width: 40px; text-align: center !important; opacity: 0.8; }
                             .col-count { width: 40px; text-align: center !important; font-weight: bold; }
                             .col-pkg { width: 20%; font-size: 0.85rem; text-align: center !important; opacity: 0.7; }
+                            .group-border-bottom { border-bottom: 2px solid var(--text-color) !important; opacity: 0.1; }
                             
-                            /* 卡片样式自适应 */
+                            /* 卡片容器 */
                             .timeline-container { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+                            
+                            /* 课程卡片 */
                             .timeline-card { 
-                                background-color: var(--secondary-background-color); /* 卡片背景 */
-                                border: 1px solid rgba(128,128,128,0.3); 
+                                background-color: var(--secondary-background-color); 
+                                border: 1px solid rgba(128,128,128,0.2); 
                                 border-radius: 4px; 
-                                padding: 2px 5px; 
+                                padding: 3px 6px; 
                                 display: flex; 
                                 flex-direction: column; 
                                 min-width: 80px; 
+                                box-shadow: 0 1px 2px rgba(0,0,0,0.05);
                             }
-                            /* 针对 GAP (空档) 的特殊样式 */
+                            
+                            /* 空档卡片 */
                             .card-gap {
-                                background-color: rgba(128,128,128,0.05) !important;
-                                border: 1px dashed rgba(128,128,128,0.2) !important;
+                                background-color: transparent !important;
+                                border: 1px dashed rgba(128,128,128,0.3) !important;
+                                opacity: 0.6;
                             }
-                            .card-header { display: flex; align-items: center; }
+                            
+                            .card-header { display: flex; align-items: center; margin-bottom: 2px; }
+                            
+                            /* 序号圆点 */
                             .seq-badge { 
                                 background-color: var(--primary-color); 
                                 color: white; 
                                 font-size: 0.7rem; 
                                 font-weight: bold; 
-                                width: 14px; height: 14px; 
+                                width: 16px; height: 16px; 
                                 border-radius: 50%; 
                                 display: flex; align-items: center; justify-content: center; 
-                                margin-right: 4px; 
+                                margin-right: 5px; 
                             }
-                            .subject-name { font-weight: 800; font-size: 0.85rem; color: var(--text-color); }
-                            .card-footer { display: flex; justify-content: space-between; font-size: 0.75rem; opacity: 0.6; margin-top: 2px;}
-                            .arrow-icon { opacity: 0.4; font-size: 1rem; margin: 0 1px; }
+                            
+                            /* 科目名称 */
+                            .subject-name { 
+                                font-weight: 700; 
+                                font-size: 0.9rem; 
+                                color: var(--text-color); /* 确保科目名可见 */
+                            }
+                            
+                            /* 卡片底部 (班级/时长) - 关键修复点 */
+                            .card-footer { 
+                                display: flex; 
+                                justify-content: space-between; 
+                                font-size: 0.75rem; 
+                                color: var(--text-color); /* 之前是 #aaa，在亮色模式看不见 */
+                                opacity: 0.7; /* 用透明度来做灰度 */
+                            }
+                            
+                            /* 箭头 - 关键修复点 */
+                            .arrow-icon { 
+                                color: var(--text-color); 
+                                opacity: 0.3; 
+                                font-size: 1rem; 
+                                margin: 0 2px; 
+                            }
                         </style>
+                        """
                         """
                         
                         # 重新生成 HTML 行 (逻辑保持不变，只需修改 CSS 类名引用的部分)
