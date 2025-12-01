@@ -1736,6 +1736,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         st.info("暂无数据")
                     else:
                         # 🔥🔥🔥 [修复版] CSS：完美适配 Light/Dark Mode 🔥🔥🔥
+                        # 🔥🔥🔥 [修复版] 修复了最后一行看不清的问题 🔥🔥🔥
                         table_css = """
                         <style>
                             /* 全局表格样式 */
@@ -1746,7 +1747,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 margin-bottom: 1rem; 
                                 font-size: 14px; 
                                 table-layout: fixed; 
-                                /* 关键：背景和文字跟随系统 */
                                 background-color: var(--background-color); 
                                 color: var(--text-color);
                             }
@@ -1757,7 +1757,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 color: var(--text-color); 
                                 padding: 10px 6px; 
                                 text-align: center; 
-                                border-bottom: 2px solid var(--primary-color); /* 主题色底边 */
+                                border-bottom: 2px solid var(--primary-color); 
                                 border-top: 1px solid rgba(128,128,128,0.2); 
                             }
                             
@@ -1768,7 +1768,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 border-right: 1px solid rgba(128,128,128,0.1); 
                                 border-bottom: 1px solid rgba(128,128,128,0.1); 
                                 vertical-align: middle; 
-                                color: var(--text-color); /* 强制文字颜色 */
+                                color: var(--text-color); 
                             }
                             
                             /* 左侧时段列 */
@@ -1781,11 +1781,16 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 text-align: center !important;
                             }
                             
+                            /* 分组底部分割线 (关键修复) */
+                            /* 之前这里有 opacity: 0.1 导致整行看不清，已删除 */
+                            .group-border-bottom { 
+                                border-bottom: 2px solid rgba(128, 128, 128, 0.3) !important; 
+                            }
+                            
                             /* 辅助列 */
                             .col-duration { width: 40px; text-align: center !important; opacity: 0.8; }
                             .col-count { width: 40px; text-align: center !important; font-weight: bold; }
                             .col-pkg { width: 20%; font-size: 0.85rem; text-align: center !important; opacity: 0.7; }
-                            .group-border-bottom { border-bottom: 2px solid var(--text-color) !important; opacity: 0.1; }
                             
                             /* 卡片容器 */
                             .timeline-container { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
@@ -1811,7 +1816,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             
                             .card-header { display: flex; align-items: center; margin-bottom: 2px; }
                             
-                            /* 序号圆点 */
                             .seq-badge { 
                                 background-color: var(--primary-color); 
                                 color: white; 
@@ -1823,23 +1827,20 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 margin-right: 5px; 
                             }
                             
-                            /* 科目名称 */
                             .subject-name { 
                                 font-weight: 700; 
                                 font-size: 0.9rem; 
-                                color: var(--text-color); /* 确保科目名可见 */
+                                color: var(--text-color); 
                             }
                             
-                            /* 卡片底部 (班级/时长) - 关键修复点 */
                             .card-footer { 
                                 display: flex; 
                                 justify-content: space-between; 
                                 font-size: 0.75rem; 
-                                color: var(--text-color); /* 之前是 #aaa，在亮色模式看不见 */
-                                opacity: 0.7; /* 用透明度来做灰度 */
+                                color: var(--text-color); 
+                                opacity: 0.7; 
                             }
                             
-                            /* 箭头 - 关键修复点 */
                             .arrow-icon { 
                                 color: var(--text-color); 
                                 opacity: 0.3; 
