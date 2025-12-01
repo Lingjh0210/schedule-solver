@@ -315,15 +315,11 @@ class ScheduleSolver:
                             for k in self.subjects 
                             for r in range(1, self.config['max_classes_per_subject'] + 1)) <= 1)
         
-        # 找到 build_model 方法中约 200 行左右的位置
-        # 替换原有的 sum(...) <= 1 的循环
 
         for k in self.subjects:
             for t in self.TIME_SLOTS_1H:
-                # [默认逻辑] 方案A/B/C: limit = 1 (单教师)
                 limit = 1
                 
-                # [特权逻辑] 方案D: 如果开启并发，limit = 最大班数 (多教师)
                 if self.config.get('enable_concurrency', False):
                     limit = self.config['max_classes_per_subject']
                 
@@ -426,7 +422,6 @@ class ScheduleSolver:
                 slot_split_penalty * (weight_split / 100) + 
                 priority_penalty
             )
-        # ... (在 elif objective_type == 'balanced': ... 代码块结束后) ...
 
         elif objective_type == 'subject_balanced':
             import math 
@@ -450,9 +445,7 @@ class ScheduleSolver:
                 if not self.config.get('relax_hard_lock', False):
                     model.Add(active_classes_var <= locked_class_count)
                 
-                # ---------------------------------------------------------
 
-                # 辅助变量定义 (保持不变)
                 k_effective_sizes_max = [] 
                 k_effective_sizes_min = [] 
                 
@@ -1017,7 +1010,22 @@ def analyze_teacher_needs(slot_schedule):
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #666;">走班制排课搜索系统</p>', unsafe_allow_html=True)
-    
+    # ... (st.set_page_config 之后) ...
+
+    # [新增] 注入 JS 拦截刷新/关闭事件
+    # 这会在用户试图刷新页面时弹窗警告
+    import streamlit.components.v1 as components
+    components.html(
+        """
+        <script>
+        window.addEventListener('beforeunload', function (e) {
+            e.preventDefault();
+            e.returnValue = '';
+        });
+        </script>
+        """,
+        height=0,
+    )
     # 侧边栏
     with st.sidebar:
         st.header("⚙️ 系统配置")
@@ -1092,8 +1100,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         # ... (在 st.file_uploader 之后) ...
     
         if uploaded_file:
-            # 1. 检查是否是新文件 (利用文件名判断)
-            # 如果不加这个判断，每次点击按钮都会重置用户的参数，用户会疯掉
             is_new_file = False
             if 'last_uploaded_file' not in st.session_state or st.session_state['last_uploaded_file'] != uploaded_file.name:
                 is_new_file = True
@@ -1123,10 +1129,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.markdown("---")
         
         st.subheader("🔧 求解参数")
-        
-        # 注意：这里增加了 key 参数，并且 value 设为 None (或者是默认值)
-        # 如果 session_state 里有这个 key，Streamlit 会自动用 session 里的值
-        # 如果没有，才会用 value 的值
         
         # 1. 最小班额
         if 'param_min_size' not in st.session_state:
@@ -1327,9 +1329,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             st.error(f"⚠️ 检测到 {len(feasibility_issues)} 个科目存在数学逻辑冲突（必无解）：")
             
             for issue in feasibility_issues:
-                # 获取错误类型（如果有的话，兼容旧版）
                 error_type = issue.get('type', '错误')
-                # 获取详细信息（新版叫 detail，旧版叫 reason，做个兼容防止报错）
                 detail = issue.get('detail', issue.get('reason', '未知原因'))
                 
                 st.markdown(f"""
@@ -1349,7 +1349,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         disable_solve = True
 
     st.markdown("---")
-    # Solving button
     st.markdown('<div class="sub-header">🚀 开始求解</div>', unsafe_allow_html=True)
     
     if st.button("🎯 生成排课方案", type="primary", use_container_width=True, disabled=disable_solve):
@@ -1393,16 +1392,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         import math # 确保导入
 
         for i, sol_config in enumerate(solution_configs):
-            
-            # 1. 拷贝当前配置
-            run_config = config.copy()
-            # ... (在 run_config = config.copy() 之后插入) ...
 
-            # 默认使用原始数据
+            run_config = config.copy()
             current_packages = st.session_state['packages']
             split_info = None # 用于记录拆分日志
 
-            # === [新增] 方案D 处理逻辑 ===
             if sol_config['type'] == 'auto_split':
                 # 1. 执行拆分
                 new_pkgs, logs = preprocess_and_split_packages(
@@ -1433,34 +1427,23 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                 run_config['enable_concurrency'] = True                
                 run_config['relax_hard_lock'] = True
 
-            # === (原有的方案C逻辑不需要动，只要确保它在 elif 里即可) ===
             elif sol_config['type'] == 'subject_balanced':
-                # ... (你原来的代码) ...
-            
-                # 获取全校人数最多的科目人数
                 enrollment = calculate_subject_enrollment(st.session_state['packages'])
                 max_students = max(enrollment.values()) if enrollment else 0
-                
-                # 内部死规则：上限 30
                 scheme_c_limit = 30
-
                 theoretical_needed = math.ceil(max_students / scheme_c_limit)
                 run_config['max_classes_per_subject'] = int(theoretical_needed + 2)
                 
                 run_config['min_class_size'] = 1
-                
-                # 提示用户（明确告知这是独立计算的）
                 status_text.markdown(f"🔓 **{sol_config['name']}** - 已启用独立规则 (忽略全局参数，自动计算班数...)")
                 time.sleep(0.5)
 
-            # 3. 实例化求解器 (使用 run_config)
             solver_instance = ScheduleSolver(
-                current_packages, # <--- 改这里，支持方案D的拆分数据
+                current_packages, 
                 st.session_state['subject_hours'],
                 run_config
             )
 
-            # --- 4. 标准求解流程 (保持不变) ---
             current_step += 1
             progress = current_step / total_steps
             progress_bar.progress(progress)
@@ -1553,12 +1536,9 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         df_comparison = pd.DataFrame(comparison_data)
         st.dataframe(df_comparison, use_container_width=True)
         
-        # Details
         for sol in st.session_state['solutions']:
             with st.expander(f"📋 {sol['name']} - 详细结果"):
-                # ... (在 with st.expander(...) 内部) ...
 
-            # 1. 显示拆分日志 (A/B/C 风格)
                 if 'split_log' in sol:
                     st.info("✂️ **自动拆分方案**：以下大配套已被拆分为 A/B 班")
                     split_data = []
@@ -1571,14 +1551,12 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         })
                     st.dataframe(pd.DataFrame(split_data), use_container_width=True)
                 
-                # 2. [新增] 师资与开班统计 (方案D专属优化)
                 if sol['name'].startswith('方案D') and sol['status'] == 'success':
                     st.markdown("##### 👨‍🏫 师资与开班统计")
                     teacher_needs = analyze_teacher_needs(sol['slot_schedule'])
                     
                     # 整理数据
                     stats_data = []
-                    # 从 analysis 获取总班数信息 (如果 solver.analyze_solution 返回了 breakdown 更好，这里我们重新统计一下)
                     total_classes_map = defaultdict(int)
                     for item in sol['class_details']:
                         total_classes_map[item['科目']] += 1
@@ -1586,8 +1564,8 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     for subj in sorted(total_classes_map.keys()):
                         stats_data.append({
                             '科目': subj,
-                            '总开班数': total_classes_map[subj], # 这学期一共开了几个班
-                            '所需老师(并发数)': teacher_needs.get(subj, 1), # 同一时间最多几个班上课
+                            '总开班数': total_classes_map[subj], 
+                            '所需老师(并发数)': teacher_needs.get(subj, 1), 
                             '单班平均': f"{round(sum(c['人数'] for c in sol['class_details'] if c['科目']==subj)/total_classes_map[subj], 1)}人"
                         })
                     
@@ -1595,9 +1573,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
     
                 st.markdown("---")
 
-            # 3. 原有的 Tab 展示 (保持不变)
                 tab1, tab2, tab3 = st.tabs(["开班详情", "时段总表", "数据导出"])
-            # ... (后面的代码不需要动) ...
                 
                 with tab1:
                     df_class = pd.DataFrame(sol['class_details'])
@@ -1620,70 +1596,78 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         
                         table_css = """
                         <style>
-                            /* 全局表格样式 */
-                            .schedule-table {
-                                width: 100%;
-                                border-collapse: collapse;
-                                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                                margin-bottom: 1rem;
-                                font-size: 14px;
-                                color: #ffffff; 
-                                table-layout: fixed;
+                            .schedule-table { 
+                                width: 100%; 
+                                border-collapse: collapse; 
+                                font-family: sans-serif; 
+                                margin-bottom: 1rem; 
+                                font-size: 14px; 
+                                table-layout: fixed; 
+                                color: var(--text-color); /* 自动适配文字颜色 */
+                                background-color: var(--background-color); /* 自动适配背景色 */
                             }
-                            
-                            /* 表头样式 */
-                            .schedule-table th {
-                                background-color: #262730;
-                                color: #ffffff;
-                                font-weight: 700;
-                                padding: 10px 6px;
-                                text-align: center;
-                                border-bottom: 2px solid #4a4a4a;
-                                border-top: 1px solid #4a4a4a;
-                                white-space: nowrap;
-                                overflow: hidden;
+                            .schedule-table th { 
+                                background-color: var(--secondary-background-color); /* 适配表头背景 */
+                                color: var(--text-color); 
+                                padding: 10px 6px; 
+                                text-align: center; 
+                                border-bottom: 2px solid var(--primary-color); /* 使用主题色做底边 */
+                                border-top: 1px solid rgba(128,128,128,0.2); 
                             }
-                            
-                            /* 单元格样式 */
-                            .schedule-table td {
-                                padding: 6px;
-                                text-align: left;
-                                border-right: 1px solid #333333;
-                                color: #e0e0e0;
-                                vertical-align: middle;
-                                overflow: hidden;
+                            .schedule-table td { 
+                                padding: 6px; 
+                                text-align: left; 
+                                border-right: 1px solid rgba(128,128,128,0.1); 
+                                border-bottom: 1px solid rgba(128,128,128,0.1); 
+                                vertical-align: middle; 
                             }
+                            .group-border-bottom { border-bottom: 2px solid var(--text-color) !important; opacity: 0.3; }
+                            .col-slot { 
+                                width: 50px; 
+                                font-weight: 800; 
+                                color: var(--primary-color); 
+                                background-color: var(--secondary-background-color); 
+                                border-right: 2px solid rgba(128,128,128,0.2) !important; 
+                                text-align: center !important;
+                            }
+                            .col-duration { width: 40px; text-align: center !important; opacity: 0.8; }
+                            .col-count { width: 40px; text-align: center !important; font-weight: bold; }
+                            .col-pkg { width: 20%; font-size: 0.85rem; text-align: center !important; opacity: 0.7; }
                             
-                            .group-border-bottom { border-bottom: 3px solid #666666 !important; }
-                            .normal-border-bottom { border-bottom: 1px solid #333333; }
-                            
-                            /* === 列宽定义 === */
-                            .col-slot { width: 50px; font-weight: 800; color: #4fc3f7; background-color: #1a1c24; border-right: 2px solid #4a4a4a !important; text-align: center !important;}
-                            .col-duration { width: 40px; text-align: center !important; color: #90caf9; }
-                            .col-flow { width: 30%; } 
-                            .col-count { width: 40px; text-align: center !important; font-weight: bold; color: #fff; }
-                            
-                            /* 配套三列 */
-                            .col-pkg { width: 20%; color: #b0bec5; font-size: 0.85rem; text-align: center !important; }
-                            
-                            /* === 卡片样式 === */
+                            /* 卡片样式自适应 */
                             .timeline-container { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
-                            .timeline-card {
-                                background-color: #333333; border: 1px solid #444; border-radius: 4px;
-                                padding: 2px 5px; display: flex; flex-direction: column; min-width: 80px;
+                            .timeline-card { 
+                                background-color: var(--secondary-background-color); /* 卡片背景 */
+                                border: 1px solid rgba(128,128,128,0.3); 
+                                border-radius: 4px; 
+                                padding: 2px 5px; 
+                                display: flex; 
+                                flex-direction: column; 
+                                min-width: 80px; 
+                            }
+                            /* 针对 GAP (空档) 的特殊样式 */
+                            .card-gap {
+                                background-color: rgba(128,128,128,0.05) !important;
+                                border: 1px dashed rgba(128,128,128,0.2) !important;
                             }
                             .card-header { display: flex; align-items: center; }
-                            .seq-badge {
-                                background-color: #0288d1; color: white; font-size: 0.7rem; font-weight: bold;
-                                width: 14px; height: 14px; border-radius: 50%;
-                                display: flex; align-items: center; justify-content: center; margin-right: 4px;
+                            .seq-badge { 
+                                background-color: var(--primary-color); 
+                                color: white; 
+                                font-size: 0.7rem; 
+                                font-weight: bold; 
+                                width: 14px; height: 14px; 
+                                border-radius: 50%; 
+                                display: flex; align-items: center; justify-content: center; 
+                                margin-right: 4px; 
                             }
-                            .subject-name { font-weight: 800; color: #fff; font-size: 0.85rem; }
-                            .card-footer { display: flex; justify-content: space-between; font-size: 0.75rem; color: #aaa; margin-top: 2px;}
-                            .arrow-icon { color: #666; font-size: 1rem; margin: 0 1px; }
+                            .subject-name { font-weight: 800; font-size: 0.85rem; color: var(--text-color); }
+                            .card-footer { display: flex; justify-content: space-between; font-size: 0.75rem; opacity: 0.6; margin-top: 2px;}
+                            .arrow-icon { opacity: 0.4; font-size: 1rem; margin: 0 1px; }
                         </style>
                         """
                         
+                        # 重新生成 HTML 行 (逻辑保持不变，只需修改 CSS 类名引用的部分)
                         html_rows = []
                         from itertools import groupby
                         schedule_data.sort(key=lambda x: (natural_sort_key(x['时段']), x.get('sort_key_subject', '')))
@@ -1692,39 +1676,49 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                             group_items = list(items)
                             row_count = len(group_items)
                             for i, item in enumerate(group_items):
-                                border_class = "group-border-bottom" if i == row_count - 1 else "normal-border-bottom"
+                                border_class = "group-border-bottom" if i == row_count - 1 else ""
                                 row_html = f"<tr class='{border_class}'>"
-                                
                                 if i == 0:
                                     row_html += f"<td class='col-slot' rowspan='{row_count}'>{item['时段']}</td>"
                                     row_html += f"<td class='col-duration' rowspan='{row_count}'>{item['时长']}</td>"
                                 
                                 flow_html = '<div class="timeline-container">'
                                 display_items = item.get('display_items', [])
-                                
                                 for idx, d_item in enumerate(display_items):
-                                    bg_style = "background-color: #2c2c2c; border-color: #333;" if d_item['is_gap'] else ""
-                                    text_style = "color: #777;" if d_item['is_gap'] else ""
+                                    # 使用 CSS 类而不是内联样式
+                                    card_class = "timeline-card card-gap" if d_item['is_gap'] else "timeline-card"
+                                    badge_style = "opacity: 0.2;" if d_item['is_gap'] else "" # 仅对 gap 做透明度处理，颜色走 CSS
                                     
-                                    card = f"""
-                                    <div class="timeline-card" style="{bg_style}">
-                                        <div class="card-header">
-                                            <span class="seq-badge" style="{bg_style}">{d_item['seq']}</span>
-                                            <span class="subject-name" style="{text_style}">{d_item['subject']}</span>
-                                        </div>
-                                        <div class="card-footer">
-                                            <span>{d_item['class']}</span>
-                                            <span>{d_item['duration']}</span>
-                                        </div>
-                                    </div>
-                                    """
+                                    card = f"""<div class="{card_class}"><div class="card-header"><span class="seq-badge" style="{badge_style}">{d_item['seq']}</span><span class="subject-name">{d_item['subject']}</span></div><div class="card-footer"><span>{d_item['class']}</span><span>{d_item['duration']}</span></div></div>"""
                                     flow_html += card
-                                    if idx < len(display_items) - 1:
-                                        flow_html += '<div class="arrow-icon">➜</div>'
+                                    if idx < len(display_items) - 1: flow_html += '<div class="arrow-icon">➜</div>'
                                 flow_html += '</div>'
-                                row_html += f"<td>{flow_html}</td>"
                                 
+                                row_html += f"<td>{flow_html}</td>"
                                 row_html += f"<td class='col-count'>{item['人数']}</td>"
+                                
+                                # ... (后面的表格逻辑完全不用动，直接复制你原本的即可) ...
+                                # ...
+                                pkg_slots = ["-", "-", "-"]
+                                for d_item in display_items:
+                                    relative_slots = d_item.get('relative_slots', [])
+                                    if not relative_slots and 'start_offset' in d_item:
+                                         try: dur = int(d_item['duration'].replace('h',''))
+                                         except: dur = 1
+                                         start = d_item['start_offset']
+                                         relative_slots = range(start, start + dur)
+                                    pkg_str = d_item.get('packages_str', '-')
+                                    if not pkg_str or d_item.get('is_gap', False): pkg_str = "-"
+                                    for slot_idx in relative_slots:
+                                        if 0 <= slot_idx < 3: pkg_slots[slot_idx] = pkg_str
+                                for grid_idx in range(3):
+                                    row_html += f"<td class='col-pkg'>{pkg_slots[grid_idx]}</td>"
+                                row_html += "</tr>"
+                                html_rows.append(row_html)
+
+                        # 表头结构不变
+                        full_html = f"""{table_css}<table class="schedule-table"><thead><tr><th class="col-slot">时段</th><th class="col-duration">长</th><th>课程流程</th><th class="col-count">数</th><th class="col-pkg">第 1 小时</th><th class="col-pkg">第 2 小时</th><th class="col-pkg">第 3 小时</th></tr></thead><tbody>{''.join(html_rows)}</tbody></table>"""
+                        st.markdown(full_html, unsafe_allow_html=True)
                                 
                                 pkg_slots = ["-", "-", "-"]
                                 
