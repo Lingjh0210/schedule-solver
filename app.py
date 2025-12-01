@@ -2097,7 +2097,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         # =========================================================
                         # 3. 处理 "所有班级及涉及的配套" Sheet
                         # =========================================================
-                        df_overview = df_class_export[['科目 & 班级', '人数', '学生配套']].copy()
+                        df_overview = df_class_export[['科目 & 班级', '学生配套', '人数']].copy()
                         df_overview.columns = ['科目 SUBJECT', '配套 PACKAGE', '人数']
                         df_overview.to_excel(writer, sheet_name='导入', index=False)
                         
