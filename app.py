@@ -257,19 +257,11 @@ class ScheduleSolver:
                     u_pkr[(p, k, r)] = model.NewBoolVar(f'u_{p}_{k}_{r}')
                     for t in self.TIME_SLOTS_1H:
                         x_prt[(p, k, r, t)] = model.NewBoolVar(f'x_{p}_{k}_{r}_{t}')
-        # ==============================================================================
-        # [优化] 打破对称性 (Symmetry Breaking)
-        # ==============================================================================
-        
-        # 1. 强制按顺序开班：只有当第 r-1 个班开启时，第 r 个班才能开启
-        # 防止出现：班1关闭，但班2开启的情况
+
         for k in self.subjects:
             for r in range(2, self.config['max_classes_per_subject'] + 1):
                 model.Add(u_r[(k, r)] <= u_r[(k, r - 1)])
 
-        # 2. 强制班级人数降序排列：班 r 的人数 <= 班 r-1 的人数
-        # 消除“学生互换班级”造成的等价解
-        # 注意：这不会影响“均衡班额”的目标，因为 20,20,20 依然满足 >= 关系
         for k in self.subjects:
             for r in range(2, self.config['max_classes_per_subject'] + 1):
                 # 计算第 r 班的人数
@@ -437,20 +429,12 @@ class ScheduleSolver:
         # ... (在 elif objective_type == 'balanced': ... 代码块结束后) ...
 
         elif objective_type == 'subject_balanced':
-            # ==============================================================================
-            # [方案C - 绝对锁定版] 
-            # 1. 独立规则：无视外部参数
-            # 2. 单班上限：30人
-            # 3. 开班数量：强制锁定为 (总人数/30) 向上取整，绝不多开一个
-            # ==============================================================================
             import math 
             
             total_excess_penalty = 0 
             total_raw_penalty = 0    
             
-            # 内部死规则配置
             allowed_gap = 6      # 允许误差
-            # [修改] 优先读取动态配置，如果没有则默认为 30 (兼容旧方案)
             scheme_c_max_size = self.config.get('dynamic_max_limit', 30)
 
 
@@ -463,10 +447,6 @@ class ScheduleSolver:
                     locked_class_count = 0
                 
                 active_classes_var = sum(u_r[(k, r)] for r in range(1, self.config['max_classes_per_subject'] + 1))
-                
-                # 🔥🔥🔥 [核心修改]：松绑逻辑 🔥🔥🔥
-                # 如果配置里要求松绑 (relax_hard_lock=True)，就不加这个硬约束。
-                # 让 50万 的开班罚分去自动控制班数，而不是数学公式强制锁死。
                 if not self.config.get('relax_hard_lock', False):
                     model.Add(active_classes_var <= locked_class_count)
                 
@@ -519,10 +499,6 @@ class ScheduleSolver:
                 total_excess_penalty += k_excess
                 total_raw_penalty += k_range
 
-            # --- 权重配置 ---
-            # 由于班数已经被硬约束锁死了，这里的开班惩罚其实已经不起作用了。
-            # 我们只需要关注均衡即可。
-            
             weight_class_penalty = 0      # 班数已锁死，无需惩罚
             weight_excess = 1000000       # 严禁误差超标
             weight_raw = 100              # 尽量平均
@@ -663,7 +639,6 @@ class ScheduleSolver:
         y_rt = result['variables']['y_rt']
         u_pkr = result['variables']['u_pkr']
         
-        # ========== 1. 班级命名映射 ==========
         class_name_map = {} 
         for k in self.subjects:
             active_classes = []
@@ -681,7 +656,6 @@ class ScheduleSolver:
                 for item in active_classes:
                     class_name_map[(k, item['r'])] = "班"
 
-        # ========== 2. 开班详情 ==========
         class_details = []
         for k in self.subjects:
             for r in range(1, self.config['max_classes_per_subject'] + 1):
@@ -702,7 +676,6 @@ class ScheduleSolver:
                     })
         class_details.sort(key=lambda x: (x['科目'], x['班级']))
 
-        # ========== 3. 时段总表 ==========
         slot_schedule_data = []
         
         for group_name in sorted(self.SLOT_GROUPS.keys(), key=natural_sort_key):
@@ -796,8 +769,6 @@ class ScheduleSolver:
                 for idx, item in enumerate(row_items):
                     ui_class = item['class_name'].replace('班', '')
                     
-                    # [核心修改] 计算该课程占用的所有相对槽位 [0, 1, 2]
-                    # 例如：如果 active_slots=[17, 19], group_start=17 -> relative=[0, 2]
                     relative_slots = [t - group_start_time for t in item['active_slots']]
                     
                     display_list.append({
@@ -838,19 +809,13 @@ def check_data_feasibility(packages, subject_hours, config):
     max_k = config['max_classes_per_subject']
     num_slots = config['num_slots']
     
-    # 计算系统总容量（小时数）
-    # 前 num_slots-1 个组是2小时，最后一个是3小时
+
     total_system_hours = (num_slots - 1) * 2 + 3
     
-    # 获取并发限制 (如果你还没加并发功能，这里默认为1)
-    # 如果你加了 'default_concurrency'，请在这里读取 config['default_concurrency']
     concurrency_limit = config.get('default_concurrency', 1) 
 
     enrollment = calculate_subject_enrollment(packages)
     
-    # ==========================================
-    # 1. 检查人数容量 (之前的逻辑)
-    # ==========================================
     for subject, total_students in enrollment.items():
         is_capacity_feasible = False
         min_classes_needed = 0
@@ -870,16 +835,11 @@ def check_data_feasibility(packages, subject_hours, config):
             })
             continue # 人数都排不下，后面不用算了
 
-        # ==========================================
-        # 2. [新增] 检查教师/教室资源瓶颈
-        # ==========================================
-        # 该科目单班时长
+
         hours_per_class = subject_hours.get(subject, 0)
-        # 该科目总共需要的“人次·小时”
-        # 假设最少开 min_classes_needed 个班，那么总共需要占用时间片：
+
         total_slots_needed = min_classes_needed * hours_per_class
-        
-        # 能够提供的最大时间片 = 总时长 * 并发数
+
         max_slots_available = total_system_hours * concurrency_limit
         
         if total_slots_needed > max_slots_available:
@@ -890,9 +850,7 @@ def check_data_feasibility(packages, subject_hours, config):
                 'suggestion': f"增加【时段组数量】，或者允许【{subject}】多班并发上课。"
             })
 
-    # ==========================================
-    # 3. [新增] 检查学生负荷过载
-    # ==========================================
+
     for pkg_name, pkg_data in packages.items():
         # 计算该配套的总课时
         total_pkg_hours = sum(pkg_data['科目'].values())
@@ -924,25 +882,16 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     # 你的逻辑：最小人数 - 3 (且至少为1，防止负数)
     calculated_min = max(1, min_student_count - 3)
     
-    # 🔥 建议增加：安全封顶 (比如 15)
-    # 解释：如果最少科目都有 40 人，算出 37 人作为底线太高了，会导致其他大课无法拆分成小班。
-    # 所以我们取两者的较小值：min(15, 计算值)
+
     suggested_min_size = min(15, calculated_min)
 
     # 2. 最大班额 (修正：去掉 max(40) 的硬限制)
     max_student_count = max(enrollment.values())
     
-    # 获取当前允许的最大班数 (如果你在 UI 上默认是 3，这里就用 3)
-    # 关键点：这个值必须和下面 st.number_input 的默认值保持一致
     assumed_max_classes = 1
-    
-    # 🔥 核心修正：直接向上取整，不加任何人工保底
-    # 比如：总人数 100，允许 3 个班 -> ceil(33.3) = 34
-    # 比如：总人数 25， 允许 3 个班 -> ceil(8.3) = 9
-    # 这样算出来的就是“刚好能塞进去”的数值
+
     raw_max_size = math.ceil(max_student_count / assumed_max_classes)
     
-    # 稍微加 1-2 人的余量防止太拥挤导致无解 (可选，不想加就直接用 raw_max_size)
     suggested_max_size = raw_max_size + 3
 
     # 3. 时段组数量 (保持不变)
@@ -980,35 +929,25 @@ def on_max_classes_change():
     if 'packages' not in st.session_state:
         return
         
-    # 获取用户刚刚修改后的“最大班数”
-    # 注意：这里需要通过 session_state 获取，因为 widget 还没重绘完成
+
     current_max_classes = st.session_state.get('param_max_classes', 3)
     
-    # 2. 获取人数最多的科目人数
     enrollment = calculate_subject_enrollment(st.session_state['packages'])
     if not enrollment:
         return
     max_student_count = max(enrollment.values())
     
-    # 3. 重新计算理论底线
     import math
-    # 逻辑：总人数 / 班数 = 单班最小容量
     raw_new_size = math.ceil(max_student_count / current_max_classes)
-    suggested_new_size = raw_new_size + 3 # 保持一点余量
+    suggested_new_size = raw_new_size + 3
     
-    # 4. 更新【最大班额】的 Session State
-    # Streamlit 会在重新运行脚本时，把这个新值填入 number_input
+
     st.session_state['param_max_size'] = int(suggested_new_size)
     
     # 5. (可选) 给个提示
     st.toast(f"已根据 {current_max_classes} 个班重新计算，最大班额调整为 {suggested_new_size} 人", icon="🔄")
 
-# ==============================================================================
-# [新增功能] 方案D专用：智能拆分工具
-# ==============================================================================
-# ==============================================================================
-# [修改] 智能拆分函数 (使用 A/B/C 命名)
-# ==============================================================================
+
 def preprocess_and_split_packages(original_packages, max_class_size=24):
     """自动拆分超大配套 (命名优化版)"""
     import math
@@ -1055,11 +994,7 @@ def analyze_teacher_needs(slot_schedule):
     """
     from collections import defaultdict
     
-    # 1. 统计每个科目总共开了多少班
-    # (这个其实在 class_details 里有，但这里主要算并发)
-    
-    # 2. 计算最大并发数 (Max Concurrency)
-    # 逻辑：遍历每个时间段，数一数每个科目出现了几次
+
     teacher_needs = defaultdict(int)
     
     for slot_data in slot_schedule:
