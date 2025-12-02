@@ -1071,7 +1071,7 @@ def analyze_teacher_needs(slot_schedule):
     return teacher_needs
 
 # ==============================================================================
-# [修复版] 本地存储工具 (白名单模式 + 错误提示)
+# [增强版] 本地存储工具 (自动修正数据格式 + 调试反馈)
 # ==============================================================================
 import pickle
 import os
@@ -1079,15 +1079,26 @@ import datetime
 
 HISTORY_FILE = "schedule_history.pkl"
 
+def clean_data_for_storage(obj):
+    """递归将 set 转为 list，确保可以被序列化"""
+    if isinstance(obj, set):
+        return list(obj)
+    elif isinstance(obj, dict):
+        return {k: clean_data_for_storage(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_data_for_storage(i) for i in obj]
+    else:
+        return obj
+
 def save_history_to_disk(current_solutions):
     """
-    将当前方案保存到本地文件 (仅保留最后2次)
+    保存历史记录 (带强制清洗)
     """
     if not current_solutions:
+        print("❌ 保存失败：当前没有方案数据")
         return
     
-    # 1. 白名单过滤：只保存界面展示需要的数据
-    # 彻底杜绝保存 solver, variables 等无法序列化的对象
+    # 1. 白名单过滤
     KEYS_TO_SAVE = [
         'name', 'status', 'solve_status', 'solve_time', 'icon', 
         'analysis', 'class_details', 'slot_schedule', 'split_log'
@@ -1095,52 +1106,51 @@ def save_history_to_disk(current_solutions):
     
     sanitized_solutions = []
     for sol in current_solutions:
-        # 只提取白名单里的 key
+        # 提取白名单数据
         safe_sol = {k: sol[k] for k in KEYS_TO_SAVE if k in sol}
+        # 🔥 关键：深度清洗，把 set 转为 list，防止 pickle 报错
+        safe_sol = clean_data_for_storage(safe_sol)
         sanitized_solutions.append(safe_sol)
     
-    # 2. 读取现有历史
+    # 2. 读取旧历史
     history = []
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, 'rb') as f:
                 history = pickle.load(f)
-        except Exception as e:
-            # 如果旧文件损坏，就忽略它
-            print(f"历史文件读取失败: {e}")
+        except:
             history = []
     
-    # 3. 构造新记录
+    # 3. 追加新记录
     timestamp = datetime.datetime.now().strftime("%m-%d %H:%M")
-    new_record = {'time': timestamp, 'data': sanitized_solutions}
+    # 避免重复保存完全一样的数据
+    if not history or history[-1]['data'] != sanitized_solutions:
+        history.append({'time': timestamp, 'data': sanitized_solutions})
+        print(f"✅ 历史记录已追加: {timestamp}")
+    else:
+        print("⚠️ 数据未变，跳过保存")
     
-    # 避免重复保存（对比最后一条）
-    # 注意：这里对比可能会很慢或出错，简单起见，只要有新结果就保存
-    history.append(new_record)
-    
-    # 4. 只保留最后 2 场
+    # 4. 限制数量
     if len(history) > 2:
         history = history[-2:]
         
-    # 5. 写入磁盘 (带错误捕获)
+    # 5. 写入
     try:
         with open(HISTORY_FILE, 'wb') as f:
             pickle.dump(history, f)
-        # print(f"成功保存历史记录: {timestamp}") # 调试用
+        # 在界面上显示个小绿标，证明运行到了这里
+        st.toast(f"已保存到本地记录 ({timestamp})", icon="💾")
     except Exception as e:
-        st.error(f"⚠️ 历史记录保存失败: {str(e)}")
+        st.error(f"❌ 保存文件失败: {str(e)}")
+        print(f"❌ 保存错误: {e}")
 
 def load_history_from_disk():
-    """读取本地历史记录"""
-    if not os.path.exists(HISTORY_FILE):
-        return []
+    if not os.path.exists(HISTORY_FILE): return []
     try:
         with open(HISTORY_FILE, 'rb') as f:
             return pickle.load(f)
-    except Exception as e:
-        st.error(f"⚠️ 历史记录读取失败: {str(e)}")
-        return []
-
+    except: return []
+        
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
@@ -1673,6 +1683,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.markdown('<div class="success-box">', unsafe_allow_html=True)
         st.success(f"✅ 成功生成 {len(solutions)} 个方案！")
         st.markdown('</div>', unsafe_allow_html=True)
+        save_history_to_disk(solutions)
     
     if 'solutions' in st.session_state:
         st.markdown("---")
