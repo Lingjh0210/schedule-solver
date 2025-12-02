@@ -872,7 +872,7 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     # 1. 最小班额 (保持不变)
     min_student_count = min(enrollment.values())    
     
-    assumed_max_classes = 1
+    assumed_min_classes = 1
 
     raw_min_size = math.ceil(min_student_count / assumed_min_classes)
     
@@ -946,9 +946,7 @@ def on_max_classes_change():
     # 5. (可选) 给个提示
     st.toast(f"已根据 {current_max_classes} 个班重新计算，最大班额调整为 {suggested_new_size} 人", icon="🔄")
 
-# ==============================================================================
-# [新增] 本地存储工具 (History Storage)
-# ==============================================================================
+
 import pickle
 import os
 
