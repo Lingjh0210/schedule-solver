@@ -870,7 +870,13 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
         return {}
 
     # 1. 最小班额 (保持不变)
-    min_student_count = min(enrollment.values())
+    min_student_count = min(enrollment.values())    
+    
+    assumed_max_classes = 1
+
+    raw_min_size = math.ceil(min_student_count / assumed_min_classes)
+    
+    suggested_max_size = raw_max_size - 3
     
     # 你的逻辑：最小人数 - 3 (且至少为1，防止负数)
     calculated_min = max(1, min_student_count - 3)
