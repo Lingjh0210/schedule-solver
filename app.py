@@ -879,12 +879,12 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     suggested_min_size = raw_min_size - 3
     
     # 你的逻辑：最小人数 - 3 (且至少为1，防止负数)
-    calculated_min = max(1, min_student_count - 3)
+    calculated_min = max(1, suggested_min_size - 3)
     
 
     suggested_min_size = min(15, calculated_min)
 
-    # 2. 最大班额 (修正：去掉 max(40) 的硬限制)
+    # 2. 最大班额
     max_student_count = max(enrollment.values())
     
     assumed_max_classes = 1
@@ -918,7 +918,8 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
         'min_class_size': int(suggested_min_size),
         'max_class_size': int(suggested_max_size),
         'num_slots': int(max(suggested_slots, 8)) 
-    }  
+    } 
+    
 def on_max_classes_change():
     """
     当【每科目最大班数】改变时触发：
