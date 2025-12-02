@@ -1071,25 +1071,32 @@ def analyze_teacher_needs(slot_schedule):
     return teacher_needs
 
 # ==============================================================================
-# [新增] 本地存储工具 (History Storage)
+# [修复版] 本地存储工具 (白名单模式 + 错误提示)
 # ==============================================================================
 import pickle
 import os
+import datetime
 
 HISTORY_FILE = "schedule_history.pkl"
 
 def save_history_to_disk(current_solutions):
     """
-    将当前方案保存到本地文件，仅保留最后 2 次记录
+    将当前方案保存到本地文件 (仅保留最后2次)
     """
     if not current_solutions:
         return
     
-    # 1. 清洗数据：移除不可序列化的对象 (如 solver 引擎, variables 变量)
-    # 我们只保存用于展示的数据 (analysis, class_details, slot_schedule)
+    # 1. 白名单过滤：只保存界面展示需要的数据
+    # 彻底杜绝保存 solver, variables 等无法序列化的对象
+    KEYS_TO_SAVE = [
+        'name', 'status', 'solve_status', 'solve_time', 'icon', 
+        'analysis', 'class_details', 'slot_schedule', 'split_log'
+    ]
+    
     sanitized_solutions = []
     for sol in current_solutions:
-        safe_sol = {k: v for k, v in sol.items() if k not in ['solver', 'variables']}
+        # 只提取白名单里的 key
+        safe_sol = {k: sol[k] for k in KEYS_TO_SAVE if k in sol}
         sanitized_solutions.append(safe_sol)
     
     # 2. 读取现有历史
@@ -1098,25 +1105,30 @@ def save_history_to_disk(current_solutions):
         try:
             with open(HISTORY_FILE, 'rb') as f:
                 history = pickle.load(f)
-        except:
-            history = [] # 如果文件损坏，重置
+        except Exception as e:
+            # 如果旧文件损坏，就忽略它
+            print(f"历史文件读取失败: {e}")
+            history = []
     
-    # 3. 追加新记录 (作为一个整体)
-    # 格式: [{'time': '10:00', 'data': [方案A, 方案B...]}]
-    import datetime
+    # 3. 构造新记录
     timestamp = datetime.datetime.now().strftime("%m-%d %H:%M")
+    new_record = {'time': timestamp, 'data': sanitized_solutions}
     
-    # 避免重复保存相同的数据
-    if not history or history[-1]['data'] != sanitized_solutions:
-        history.append({'time': timestamp, 'data': sanitized_solutions})
+    # 避免重复保存（对比最后一条）
+    # 注意：这里对比可能会很慢或出错，简单起见，只要有新结果就保存
+    history.append(new_record)
     
     # 4. 只保留最后 2 场
     if len(history) > 2:
         history = history[-2:]
         
-    # 5. 写入磁盘
-    with open(HISTORY_FILE, 'wb') as f:
-        pickle.dump(history, f)
+    # 5. 写入磁盘 (带错误捕获)
+    try:
+        with open(HISTORY_FILE, 'wb') as f:
+            pickle.dump(history, f)
+        # print(f"成功保存历史记录: {timestamp}") # 调试用
+    except Exception as e:
+        st.error(f"⚠️ 历史记录保存失败: {str(e)}")
 
 def load_history_from_disk():
     """读取本地历史记录"""
@@ -1125,8 +1137,10 @@ def load_history_from_disk():
     try:
         with open(HISTORY_FILE, 'rb') as f:
             return pickle.load(f)
-    except:
+    except Exception as e:
+        st.error(f"⚠️ 历史记录读取失败: {str(e)}")
         return []
+
 # main design
 def main():
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
