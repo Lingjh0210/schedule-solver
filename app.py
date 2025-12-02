@@ -869,20 +869,22 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     if not enrollment:
         return {}
 
+    min_student_count = min(enrollment.values())
+    
+    # 🔥🔥🔥 [核心修改] 新的最小班额算法 🔥🔥🔥
+    if min_student_count > 20:
+        # 逻辑：如果人数较多(>20)，则允许拆分。
+        # 最小班额 = (总人数 / 允许最大班数) - 3
+        # 例如 90人 / 3 = 30 -> 建议 27
+        raw_min = math.floor(min_student_count / current_max_classes)
+        suggested_min_size = max(1, raw_min - 3)
+    else:
+        # 逻辑：如果人数很少(<=20)，通常只开1个班，或者不宜拆太碎
+        # 最小班额 = 总人数 - 3
+        # 例如 8人 -> 建议 5
+        suggested_min_size = max(1, min_student_count - 3)
     # 1. 最小班额 (保持不变)
-    min_student_count = min(enrollment.values())    
-    
-    assumed_min_classes = 1
 
-    raw_min_size = math.ceil(min_student_count / assumed_min_classes)
-    
-    suggested_min_size = raw_min_size - 3
-    
-    # 你的逻辑：最小人数 - 3 (且至少为1，防止负数)
-    calculated_min = max(1, suggested_min_size - 3)
-    
-
-    suggested_min_size = min(15, calculated_min)
 
     # 2. 最大班额
     max_student_count = max(enrollment.values())
