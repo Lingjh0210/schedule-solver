@@ -1466,26 +1466,26 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             total_students = sum(p['人数'] for p in st.session_state['packages'].values())
             st.metric("学生总数", total_students)
     
-    # 配套详情
-    with st.expander("查看配套详情"):
-        df_packages = []
-        for name, data in st.session_state['packages'].items():
-            subjects_str = ', '.join([f"{k}({v}h)" for k, v in data['科目'].items()])
-            df_packages.append({
-                '配套': name,
-                '人数': data['人数'],
-                '科目': subjects_str
-            })
-        st.dataframe(pd.DataFrame(df_packages), use_container_width=True)
-    
-    # 科目选修统计
-    with st.expander("查看科目选修统计"):
-        enrollment = calculate_subject_enrollment(st.session_state['packages'])
-        df_enrollment = pd.DataFrame([
-            {'科目': k, '课时': st.session_state['subject_hours'][k], '选修人数': enrollment[k]}
-            for k in sorted(enrollment.keys(), key=lambda x: enrollment[x], reverse=True)
-        ])
-        st.dataframe(df_enrollment, use_container_width=True)
+        # 配套详情
+        with st.expander("查看配套详情"):
+            df_packages = []
+            for name, data in st.session_state['packages'].items():
+                subjects_str = ', '.join([f"{k}({v}h)" for k, v in data['科目'].items()])
+                df_packages.append({
+                    '配套': name,
+                    '人数': data['人数'],
+                    '科目': subjects_str
+                })
+            st.dataframe(pd.DataFrame(df_packages), use_container_width=True)
+        
+        # 科目选修统计
+        with st.expander("查看科目选修统计"):
+            enrollment = calculate_subject_enrollment(st.session_state['packages'])
+            df_enrollment = pd.DataFrame([
+                {'科目': k, '课时': st.session_state['subject_hours'][k], '选修人数': enrollment[k]}
+                for k in sorted(enrollment.keys(), key=lambda x: enrollment[x], reverse=True)
+            ])
+            st.dataframe(df_enrollment, use_container_width=True)
     
     st.markdown("---")
     
