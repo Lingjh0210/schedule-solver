@@ -925,9 +925,6 @@ def on_max_classes_change():
     当【每科目最大班数】改变时触发：
     自动重新计算并更新【最大班额】的建议值
     """
-    # 1. 确保有数据且有当前设置
-    # 主内容区
-    # 修改逻辑：如果没有 input 数据，且也没有历史结果，才显示欢迎页并退出
     if 'packages' not in st.session_state and 'solutions' not in st.session_state:
         return
         
