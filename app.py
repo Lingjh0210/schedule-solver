@@ -1,3 +1,4 @@
+
 """
 排课求解器 Web UI
 基于 Streamlit 框架
@@ -952,60 +953,45 @@ import os
 
 HISTORY_FILE = "schedule_history.pkl"
 
-def save_history_to_disk(current_solutions, custom_name=None):
+def save_history_to_disk(current_solutions):
     """
-    保存历史记录 (支持自定义命名)
+    将当前方案保存到本地文件，仅保留最后 2 次记录
     """
     if not current_solutions:
-        st.toast("❌ 保存失败：无数据", icon="⚠️")
         return
     
-    # 1. 白名单过滤 (保持不变)
-    KEYS_TO_SAVE = [
-        'name', 'status', 'solve_status', 'solve_time', 'icon', 
-        'analysis', 'class_details', 'slot_schedule', 'split_log'
-    ]
-    
+    # 1. 清洗数据：移除不可序列化的对象 (如 solver 引擎, variables 变量)
+    # 我们只保存用于展示的数据 (analysis, class_details, slot_schedule)
     sanitized_solutions = []
     for sol in current_solutions:
-        safe_sol = {k: sol[k] for k in KEYS_TO_SAVE if k in sol}
-        safe_sol = clean_data_for_storage(safe_sol)
+        safe_sol = {k: v for k, v in sol.items() if k not in ['solver', 'variables']}
         sanitized_solutions.append(safe_sol)
     
-    # 2. 读取旧历史
+    # 2. 读取现有历史
     history = []
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, 'rb') as f:
                 history = pickle.load(f)
         except:
-            history = []
+            history = [] # 如果文件损坏，重置
     
-    # 3. 构造新记录
+    # 3. 追加新记录 (作为一个整体)
+    # 格式: [{'time': '10:00', 'data': [方案A, 方案B...]}]
+    import datetime
     timestamp = datetime.datetime.now().strftime("%m-%d %H:%M")
-    # 如果没起名，就用时间戳代替
-    record_name = custom_name if custom_name and custom_name.strip() else f"自动保存_{timestamp}"
     
-    new_record = {
-        'time': timestamp,
-        'name': record_name,     # <--- 新增字段
-        'data': sanitized_solutions
-    }
+    # 避免重复保存相同的数据
+    if not history or history[-1]['data'] != sanitized_solutions:
+        history.append({'time': timestamp, 'data': sanitized_solutions})
     
-    # 追加 (不再检查重复，因为用户是手动点击保存的)
-    history.append(new_record)
-    
-    # 4. 限制数量 (手动保存模式下，建议保留更多，这里改为10条)
-    if len(history) > 10:
-        history = history[-10:]
+    # 4. 只保留最后 2 场
+    if len(history) > 2:
+        history = history[-2:]
         
-    # 5. 写入
-    try:
-        with open(HISTORY_FILE, 'wb') as f:
-            pickle.dump(history, f)
-        st.toast(f"✅ 已保存: {record_name}", icon="💾")
-    except Exception as e:
-        st.error(f"❌ 保存文件失败: {str(e)}")
+    # 5. 写入磁盘
+    with open(HISTORY_FILE, 'wb') as f:
+        pickle.dump(history, f)
 
 def load_history_from_disk():
     """读取本地历史记录"""
@@ -1208,16 +1194,17 @@ def main():
         if not history_records:
             st.caption("暂无历史记录")
         else:
+            # 倒序显示，最近的在最上面
             for idx, record in enumerate(reversed(history_records)):
-                rec_name = record.get('name', record['time'])
-                rec_time = record['time']
-                btn_label = f"📂 {rec_name} ({rec_time})"
+                # idx=0 是最后一场, idx=1 是倒数第二场
+                btn_label = f"📂 加载: {record['time']} (共{len(record['data'])}个方案)"
                 
+                # 使用唯一的 key 防止冲突
                 if st.button(btn_label, key=f"hist_btn_{idx}", use_container_width=True):
                     st.session_state['solutions'] = record['data']
-                    st.toast(f"已加载: {rec_name}", icon="📂")
-                    time.sleep(0.5)
-                    st.rerun()
+                    st.toast(f"已恢复 {record['time']} 的排课结果！", icon="🎉")
+                    time.sleep(1)
+                    st.rerun() # 立即刷新页面以显示结果
             
             if st.button("🗑️ 清空历史", type="secondary", key="clear_hist"):
                 if os.path.exists(HISTORY_FILE):
@@ -1513,7 +1500,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.markdown("---")
 
     elif 'solutions' in st.session_state:
-        st.info("历史记录浏览模式")
+        st.info("📂 当前处于 **历史记录浏览模式**。您可以查看和导出结果，如需重新计算请先上传数据文件。")
     
     st.markdown("---")
     
@@ -1741,35 +1728,10 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.markdown('<div class="success-box">', unsafe_allow_html=True)
         st.success(f"✅ 成功生成 {len(solutions)} 个方案！")
         st.markdown('</div>', unsafe_allow_html=True)
+        save_history_to_disk(solutions)
     
     if 'solutions' in st.session_state:
         st.markdown("---")
-        
-        # === ✨ 新增：手动保存区域 ✨ ===
-        st.subheader("💾 保存结果")
-        
-        # 使用两列布局：左边输入框，右边按钮
-        col_save_1, col_save_2 = st.columns([3, 1])
-        
-        with col_save_1:
-            # 输入框
-            save_name_input = st.text_input(
-                "为当前方案命名", 
-                placeholder="例如：方案A_尝试1 (留空则自动命名)", 
-                label_visibility="collapsed",
-                key="save_name_key"
-            )
-            
-        with col_save_2:
-            # 保存按钮
-            if st.button("💾 保存到历史", type="secondary", use_container_width=True):
-                # 调用保存函数
-                save_history_to_disk(st.session_state['solutions'], custom_name=save_name_input)
-                # 强制刷新页面，以便侧边栏立即显示新记录
-                time.sleep(0.5)
-                st.rerun()
-        # ===============================
-
         st.markdown('<div class="sub-header">📊 方案对比</div>', unsafe_allow_html=True)
         
         comparison_data = []
