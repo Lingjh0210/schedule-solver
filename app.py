@@ -1409,6 +1409,28 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             min_value=10, max_value=100, value=24, step=1,
             help="当配套人数超过此数值时，自动拆分为多个小配套（方案D专用）"
         )
+        
+        # === ✨ 新增：方案选择器 ✨ ===
+        st.markdown("---")
+        st.subheader("🎯 方案选择")
+        
+        # 定义选项映射
+        SCHEME_OPTIONS = [
+            "方案A: 最少开班 (传统模式)",
+            "方案B: 全局均衡 (避免拥挤)",
+            "方案C: 精品小班 (强控30人)",
+            "方案D: 自动拆分 (解决超大班)"
+        ]
+        
+        # 多选框，默认全选
+        selected_schemes_ui = st.multiselect(
+            "勾选需要运行的方案",
+            options=SCHEME_OPTIONS,
+            default=SCHEME_OPTIONS,
+            help="取消勾选不需要的方案可节省计算时间"
+        )
+        # ============================
+        
         st.markdown("---")
         
         st.subheader("🔒 强制开班")
@@ -1549,12 +1571,26 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             config
         )
         
-        solution_configs = [
-            {'type': 'min_classes', 'name': '方案A：最少开班'},
-            {'type': 'balanced', 'name': '方案B：全局均衡'},
-            {'type': 'subject_balanced', 'name': '方案C：精品小班(上限30人)'},
-            {'type': 'auto_split', 'name': f'方案D：自动拆分(上限{scheme_d_limit}人)'} 
-        ]
+        # === ✨ 修改：根据选择动态生成配置 ✨ ===
+        if not selected_schemes_ui:
+            st.error("❌ 请至少选择一个方案！")
+            return # 停止运行
+
+        solution_configs = []
+        
+        # 按顺序判断，确保运行顺序 A->B->C->D
+        if "方案A: 最少开班 (传统模式)" in selected_schemes_ui:
+            solution_configs.append({'type': 'min_classes', 'name': '方案A：最少开班'})
+            
+        if "方案B: 全局均衡 (避免拥挤)" in selected_schemes_ui:
+            solution_configs.append({'type': 'balanced', 'name': '方案B：全局均衡'})
+            
+        if "方案C: 精品小班 (强控30人)" in selected_schemes_ui:
+            solution_configs.append({'type': 'subject_balanced', 'name': '方案C：精品小班(上限30人)'})
+            
+        if "方案D: 自动拆分 (解决超大班)" in selected_schemes_ui:
+            solution_configs.append({'type': 'auto_split', 'name': f'方案D：自动拆分(上限{scheme_d_limit}人)'})
+        # ======================================
         
         # 进度条初始化
         progress_container = st.container()
