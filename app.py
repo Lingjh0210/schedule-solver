@@ -293,9 +293,11 @@ class ScheduleSolver:
                         model.Add(u_pkr[(p, k, r)] == 0)
         
         for k in self.subjects:
+            total_k_students = self.subject_enrollment.get(k, 0)
+            effective_min = min(self.config['min_class_size'], total_k_students)
             for r in range(1, self.config['max_classes_per_subject'] + 1):
                 class_size = sum(self.packages[p]['人数'] * u_pkr[(p, k, r)] for p in self.package_names)
-                model.Add(class_size >= self.config['min_class_size']).OnlyEnforceIf(u_r[(k, r)])
+                model.Add(class_size >= effective_min).OnlyEnforceIf(u_r[(k, r)])
                 model.Add(class_size <= self.config['max_class_size']).OnlyEnforceIf(u_r[(k, r)])
                 model.Add(class_size == 0).OnlyEnforceIf(u_r[(k, r)].Not())
         
