@@ -925,9 +925,6 @@ def on_max_classes_change():
     当【每科目最大班数】改变时触发：
     自动重新计算并更新【最大班额】的建议值
     """
-    # 1. 确保有数据且有当前设置
-    # 主内容区
-    # 修改逻辑：如果没有 input 数据，且也没有历史结果，才显示欢迎页并退出
     if 'packages' not in st.session_state and 'solutions' not in st.session_state:
         return
         
@@ -955,45 +952,60 @@ import os
 
 HISTORY_FILE = "schedule_history.pkl"
 
-def save_history_to_disk(current_solutions):
+def save_history_to_disk(current_solutions, custom_name=None):
     """
-    将当前方案保存到本地文件，仅保留最后 2 次记录
+    保存历史记录 (支持自定义命名)
     """
     if not current_solutions:
+        st.toast("❌ 保存失败：无数据", icon="⚠️")
         return
     
-    # 1. 清洗数据：移除不可序列化的对象 (如 solver 引擎, variables 变量)
-    # 我们只保存用于展示的数据 (analysis, class_details, slot_schedule)
+    # 1. 白名单过滤 (保持不变)
+    KEYS_TO_SAVE = [
+        'name', 'status', 'solve_status', 'solve_time', 'icon', 
+        'analysis', 'class_details', 'slot_schedule', 'split_log'
+    ]
+    
     sanitized_solutions = []
     for sol in current_solutions:
-        safe_sol = {k: v for k, v in sol.items() if k not in ['solver', 'variables']}
+        safe_sol = {k: sol[k] for k in KEYS_TO_SAVE if k in sol}
+        safe_sol = clean_data_for_storage(safe_sol)
         sanitized_solutions.append(safe_sol)
     
-    # 2. 读取现有历史
+    # 2. 读取旧历史
     history = []
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, 'rb') as f:
                 history = pickle.load(f)
         except:
-            history = [] # 如果文件损坏，重置
+            history = []
     
-    # 3. 追加新记录 (作为一个整体)
-    # 格式: [{'time': '10:00', 'data': [方案A, 方案B...]}]
-    import datetime
+    # 3. 构造新记录
     timestamp = datetime.datetime.now().strftime("%m-%d %H:%M")
+    # 如果没起名，就用时间戳代替
+    record_name = custom_name if custom_name and custom_name.strip() else f"自动保存_{timestamp}"
     
-    # 避免重复保存相同的数据
-    if not history or history[-1]['data'] != sanitized_solutions:
-        history.append({'time': timestamp, 'data': sanitized_solutions})
+    new_record = {
+        'time': timestamp,
+        'name': record_name,     # <--- 新增字段
+        'data': sanitized_solutions
+    }
     
-    # 4. 只保留最后 2 场
-    if len(history) > 2:
-        history = history[-2:]
+    # 追加 (不再检查重复，因为用户是手动点击保存的)
+    history.append(new_record)
+    
+    # 4. 限制数量 (手动保存模式下，建议保留更多，这里改为10条)
+    if len(history) > 10:
+        history = history[-10:]
         
-    # 5. 写入磁盘
-    with open(HISTORY_FILE, 'wb') as f:
-        pickle.dump(history, f)
+    # 5. 写入
+    try:
+        with open(HISTORY_FILE, 'wb') as f:
+            pickle.dump(history, f)
+        st.toast(f"✅ 已保存: {record_name}", icon="💾")
+    except Exception as e:
+        st.error(f"❌ 保存文件失败: {str(e)}")
 
 def load_history_from_disk():
     """读取本地历史记录"""
@@ -1084,87 +1096,6 @@ def analyze_teacher_needs(slot_schedule):
                     teacher_needs[subj] = count
                     
     return teacher_needs
-
-# ==============================================================================
-# [增强版] 本地存储工具 (自动修正数据格式 + 调试反馈)
-# ==============================================================================
-import pickle
-import os
-import datetime
-
-HISTORY_FILE = "schedule_history.pkl"
-
-def clean_data_for_storage(obj):
-    """递归将 set 转为 list，确保可以被序列化"""
-    if isinstance(obj, set):
-        return list(obj)
-    elif isinstance(obj, dict):
-        return {k: clean_data_for_storage(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [clean_data_for_storage(i) for i in obj]
-    else:
-        return obj
-
-def save_history_to_disk(current_solutions):
-    """
-    保存历史记录 (带强制清洗)
-    """
-    if not current_solutions:
-        print("❌ 保存失败：当前没有方案数据")
-        return
-    
-    # 1. 白名单过滤
-    KEYS_TO_SAVE = [
-        'name', 'status', 'solve_status', 'solve_time', 'icon', 
-        'analysis', 'class_details', 'slot_schedule', 'split_log'
-    ]
-    
-    sanitized_solutions = []
-    for sol in current_solutions:
-        # 提取白名单数据
-        safe_sol = {k: sol[k] for k in KEYS_TO_SAVE if k in sol}
-        # 🔥 关键：深度清洗，把 set 转为 list，防止 pickle 报错
-        safe_sol = clean_data_for_storage(safe_sol)
-        sanitized_solutions.append(safe_sol)
-    
-    # 2. 读取旧历史
-    history = []
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'rb') as f:
-                history = pickle.load(f)
-        except:
-            history = []
-    
-    # 3. 追加新记录
-    timestamp = datetime.datetime.now().strftime("%m-%d %H:%M")
-    # 避免重复保存完全一样的数据
-    if not history or history[-1]['data'] != sanitized_solutions:
-        history.append({'time': timestamp, 'data': sanitized_solutions})
-        print(f"✅ 历史记录已追加: {timestamp}")
-    else:
-        print("⚠️ 数据未变，跳过保存")
-    
-    # 4. 限制数量
-    if len(history) > 2:
-        history = history[-2:]
-        
-    # 5. 写入
-    try:
-        with open(HISTORY_FILE, 'wb') as f:
-            pickle.dump(history, f)
-        # 在界面上显示个小绿标，证明运行到了这里
-        st.toast(f"已保存到本地记录 ({timestamp})", icon="💾")
-    except Exception as e:
-        st.error(f"❌ 保存文件失败: {str(e)}")
-        print(f"❌ 保存错误: {e}")
-
-def load_history_from_disk():
-    if not os.path.exists(HISTORY_FILE): return []
-    try:
-        with open(HISTORY_FILE, 'rb') as f:
-            return pickle.load(f)
-    except: return []
         
 # main design
 def main():
@@ -1196,17 +1127,16 @@ def main():
         if not history_records:
             st.caption("暂无历史记录")
         else:
-            # 倒序显示，最近的在最上面
             for idx, record in enumerate(reversed(history_records)):
-                # idx=0 是最后一场, idx=1 是倒数第二场
-                btn_label = f"📂 加载: {record['time']} (共{len(record['data'])}个方案)"
+                rec_name = record.get('name', record['time'])
+                rec_time = record['time']
+                btn_label = f"📂 {rec_name} ({rec_time})"
                 
-                # 使用唯一的 key 防止冲突
                 if st.button(btn_label, key=f"hist_btn_{idx}", use_container_width=True):
                     st.session_state['solutions'] = record['data']
-                    st.toast(f"已恢复 {record['time']} 的排课结果！", icon="🎉")
-                    time.sleep(1)
-                    st.rerun() # 立即刷新页面以显示结果
+                    st.toast(f"已加载: {rec_name}", icon="📂")
+                    time.sleep(0.5)
+                    st.rerun()
             
             if st.button("🗑️ 清空历史", type="secondary", key="clear_hist"):
                 if os.path.exists(HISTORY_FILE):
@@ -1412,6 +1342,28 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             min_value=10, max_value=100, value=24, step=1,
             help="当配套人数超过此数值时，自动拆分为多个小配套（方案D专用）"
         )
+        
+        # === ✨ 新增：方案选择器 ✨ ===
+        st.markdown("---")
+        st.subheader("🎯 方案选择")
+        
+        # 定义选项映射
+        SCHEME_OPTIONS = [
+            "方案A: 最少开班 ",
+            "方案B: 避免拥挤",
+            "方案C: 强控30人",
+            "方案D: 维修中"
+        ]
+        
+        # 多选框，默认全选
+        selected_schemes_ui = st.multiselect(
+            "勾选需要运行的方案",
+            options=SCHEME_OPTIONS,
+            default=SCHEME_OPTIONS,
+            help="取消勾选不需要的方案可节省计算时间"
+        )
+        # ============================
+        
         st.markdown("---")
         
         st.subheader("🔒 强制开班")
@@ -1426,7 +1378,9 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             st.info("请先上传数据文件")
     
     # 主内容区
-    if 'packages' not in st.session_state:
+    # 主内容区
+    # 🔥 修改 1: 只有当【既没传文件】且【也没加载历史记录】时，才会被拦截
+    if 'packages' not in st.session_state and 'solutions' not in st.session_state:
         st.markdown('<div class="info-box">', unsafe_allow_html=True)
         st.markdown("""
         ### 智能排课搜索器
@@ -1437,23 +1391,12 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         3. 🚀 点击"开始求解"按钮
         4. 📊 查看并下载结果
         
-        **数据格式要求：**
-        - 必须包含列：`配套`、`科目`、`人数`
-        - 科目格式：`会计(6),历史(4),地理(4)` 或 `会计（6）,历史（4）`
-
-    
-    
-        **功能：**
-        - 🎯 自动生成多个优化方案
-        - 🔀 支持时段分割（一个时段上不同科目）
-        - 👨‍🏫 教师资源约束（同科目不同班不冲突）
-        - 📊 时段总表（查看每个时段的全局安排）
-        - ⏰ 灵活课时
+        **或者：**
+        - 📂 点击左侧侧边栏的 **"加载历史记录"** 查看之前的方案
         """)
         st.markdown('</div>', unsafe_allow_html=True)
-        return
-    
-    # 显示数据概览
+        return 
+
     if 'packages' in st.session_state:
         st.markdown('<div class="sub-header">📊 数据概览</div>', unsafe_allow_html=True)
         
@@ -1465,27 +1408,31 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         with col3:
             total_students = sum(p['人数'] for p in st.session_state['packages'].values())
             st.metric("学生总数", total_students)
-    
-    # 配套详情
-    with st.expander("查看配套详情"):
-        df_packages = []
-        for name, data in st.session_state['packages'].items():
-            subjects_str = ', '.join([f"{k}({v}h)" for k, v in data['科目'].items()])
-            df_packages.append({
-                '配套': name,
-                '人数': data['人数'],
-                '科目': subjects_str
-            })
-        st.dataframe(pd.DataFrame(df_packages), use_container_width=True)
-    
-    # 科目选修统计
-    with st.expander("查看科目选修统计"):
-        enrollment = calculate_subject_enrollment(st.session_state['packages'])
-        df_enrollment = pd.DataFrame([
-            {'科目': k, '课时': st.session_state['subject_hours'][k], '选修人数': enrollment[k]}
-            for k in sorted(enrollment.keys(), key=lambda x: enrollment[x], reverse=True)
-        ])
-        st.dataframe(df_enrollment, use_container_width=True)
+        
+        with st.expander("查看配套详情"):
+            df_packages = []
+            for name, data in st.session_state['packages'].items():
+                subjects_str = ', '.join([f"{k}({v}h)" for k, v in data['科目'].items()])
+                df_packages.append({
+                    '配套': name,
+                    '人数': data['人数'],
+                    '科目': subjects_str
+                })
+            st.dataframe(pd.DataFrame(df_packages), use_container_width=True)
+        
+        # 科目选修统计
+        with st.expander("查看科目选修统计"):
+            enrollment = calculate_subject_enrollment(st.session_state['packages'])
+            df_enrollment = pd.DataFrame([
+                {'科目': k, '课时': st.session_state['subject_hours'][k], '选修人数': enrollment[k]}
+                for k in sorted(enrollment.keys(), key=lambda x: enrollment[x], reverse=True)
+            ])
+            st.dataframe(df_enrollment, use_container_width=True)
+        
+        st.markdown("---")
+
+    elif 'solutions' in st.session_state:
+        st.info("历史记录浏览模式")
     
     st.markdown("---")
     
@@ -1552,12 +1499,26 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             config
         )
         
-        solution_configs = [
-            {'type': 'min_classes', 'name': '方案A：最少开班'},
-            {'type': 'balanced', 'name': '方案B：全局均衡'},
-            {'type': 'subject_balanced', 'name': '方案C：精品小班(上限30人)'},
-            {'type': 'auto_split', 'name': f'方案D：自动拆分(上限{scheme_d_limit}人)'} 
-        ]
+        # === ✨ 修改：根据选择动态生成配置 ✨ ===
+        if not selected_schemes_ui:
+            st.error("❌ 请至少选择一个方案！")
+            return # 停止运行
+
+        solution_configs = []
+        
+        # 按顺序判断，确保运行顺序 A->B->C->D
+        if "方案A: 最少开班 (传统模式)" in selected_schemes_ui:
+            solution_configs.append({'type': 'min_classes', 'name': '方案A：最少开班'})
+            
+        if "方案B: 全局均衡 (避免拥挤)" in selected_schemes_ui:
+            solution_configs.append({'type': 'balanced', 'name': '方案B：全局均衡'})
+            
+        if "方案C: 精品小班 (强控30人)" in selected_schemes_ui:
+            solution_configs.append({'type': 'subject_balanced', 'name': '方案C：精品小班(上限30人)'})
+            
+        if "方案D: 自动拆分 (解决超大班)" in selected_schemes_ui:
+            solution_configs.append({'type': 'auto_split', 'name': f'方案D：自动拆分(上限{scheme_d_limit}人)'})
+        # ======================================
         
         # 进度条初始化
         progress_container = st.container()
@@ -1699,10 +1660,35 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.markdown('<div class="success-box">', unsafe_allow_html=True)
         st.success(f"✅ 成功生成 {len(solutions)} 个方案！")
         st.markdown('</div>', unsafe_allow_html=True)
-        save_history_to_disk(solutions)
     
     if 'solutions' in st.session_state:
         st.markdown("---")
+        
+        # === ✨ 新增：手动保存区域 ✨ ===
+        st.subheader("💾 保存结果")
+        
+        # 使用两列布局：左边输入框，右边按钮
+        col_save_1, col_save_2 = st.columns([3, 1])
+        
+        with col_save_1:
+            # 输入框
+            save_name_input = st.text_input(
+                "为当前方案命名", 
+                placeholder="例如：方案A_尝试1 (留空则自动命名)", 
+                label_visibility="collapsed",
+                key="save_name_key"
+            )
+            
+        with col_save_2:
+            # 保存按钮
+            if st.button("💾 保存到历史", type="secondary", use_container_width=True):
+                # 调用保存函数
+                save_history_to_disk(st.session_state['solutions'], custom_name=save_name_input)
+                # 强制刷新页面，以便侧边栏立即显示新记录
+                time.sleep(0.5)
+                st.rerun()
+        # ===============================
+
         st.markdown('<div class="sub-header">📊 方案对比</div>', unsafe_allow_html=True)
         
         comparison_data = []
