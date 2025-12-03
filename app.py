@@ -968,46 +968,6 @@ import os
 
 HISTORY_FILE = "schedule_history.pkl"
 
-def save_history_to_disk(current_solutions):
-    """
-    将当前方案保存到本地文件，仅保留最后 2 次记录
-    """
-    if not current_solutions:
-        return
-    
-    # 1. 清洗数据：移除不可序列化的对象 (如 solver 引擎, variables 变量)
-    # 我们只保存用于展示的数据 (analysis, class_details, slot_schedule)
-    sanitized_solutions = []
-    for sol in current_solutions:
-        safe_sol = {k: v for k, v in sol.items() if k not in ['solver', 'variables']}
-        sanitized_solutions.append(safe_sol)
-    
-    # 2. 读取现有历史
-    history = []
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'rb') as f:
-                history = pickle.load(f)
-        except:
-            history = [] # 如果文件损坏，重置
-    
-    # 3. 追加新记录 (作为一个整体)
-    # 格式: [{'time': '10:00', 'data': [方案A, 方案B...]}]
-    import datetime
-    timestamp = datetime.datetime.now().strftime("%m-%d %H:%M")
-    
-    # 避免重复保存相同的数据
-    if not history or history[-1]['data'] != sanitized_solutions:
-        history.append({'time': timestamp, 'data': sanitized_solutions})
-    
-    # 4. 只保留最后 2 场
-    if len(history) > 2:
-        history = history[-2:]
-        
-    # 5. 写入磁盘
-    with open(HISTORY_FILE, 'wb') as f:
-        pickle.dump(history, f)
-
 def load_history_from_disk():
     """读取本地历史记录"""
     if not os.path.exists(HISTORY_FILE):
@@ -1150,7 +1110,8 @@ def save_history_to_disk(current_solutions):
             history = []
     
     # 3. 追加新记录
-    timestamp = datetime.datetime.now().strftime("%m-%d %H:%M")
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # 避免重复保存完全一样的数据
     if not history or history[-1]['data'] != sanitized_solutions:
         history.append({'time': timestamp, 'data': sanitized_solutions})
@@ -1158,9 +1119,9 @@ def save_history_to_disk(current_solutions):
     else:
         print("⚠️ 数据未变，跳过保存")
     
-    # 4. 限制数量
-    if len(history) > 2:
-        history = history[-2:]
+    # 4. 限制数量（保留最近10条）
+    if len(history) > 10:
+        history = history[-10:]
         
     # 5. 写入
     try:
@@ -1171,13 +1132,6 @@ def save_history_to_disk(current_solutions):
     except Exception as e:
         st.error(f"❌ 保存文件失败: {str(e)}")
         print(f"❌ 保存错误: {e}")
-
-def load_history_from_disk():
-    if not os.path.exists(HISTORY_FILE): return []
-    try:
-        with open(HISTORY_FILE, 'rb') as f:
-            return pickle.load(f)
-    except: return []
         
 # main design
 def main():
@@ -1783,21 +1737,41 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         
         comparison_data = []
         for sol in st.session_state['solutions']:
-            analysis = sol['analysis']
-            comparison_data.append({
-                '方案': sol['name'],
-                '开班数': analysis['total_classes'],
-                '平均班额': f"{analysis['avg_size']}人",
-                '班额范围': f"{analysis['min_size']}-{analysis['max_size']}人",
-                '时段分割次数': analysis['split_count'],
-                '求解时间': f"{sol['solve_time']:.1f}秒",
-                '状态': sol['icon']
-            })
+            # 检查方案是否成功
+            if 'analysis' in sol:
+                analysis = sol['analysis']
+                comparison_data.append({
+                    '方案': sol['name'],
+                    '开班数': analysis['total_classes'],
+                    '平均班额': f"{analysis['avg_size']}人",
+                    '班额范围': f"{analysis['min_size']}-{analysis['max_size']}人",
+                    '时段分割次数': analysis['split_count'],
+                    '求解时间': f"{sol.get('solve_time', 0):.1f}秒",
+                    '状态': sol.get('icon', '✅')
+                })
+            else:
+                # 失败的方案
+                comparison_data.append({
+                    '方案': sol.get('name', '未知方案'),
+                    '开班数': '-',
+                    '平均班额': '-',
+                    '班额范围': '-',
+                    '时段分割次数': '-',
+                    '求解时间': f"{sol.get('solve_time', 0):.1f}秒",
+                    '状态': sol.get('icon', '❌')
+                })
         
-        df_comparison = pd.DataFrame(comparison_data)
-        st.dataframe(df_comparison, use_container_width=True)
+        if comparison_data:
+            df_comparison = pd.DataFrame(comparison_data)
+            st.dataframe(df_comparison, use_container_width=True)
+        else:
+            st.info("没有可显示的方案数据")
         
         for sol in st.session_state['solutions']:
+            # 只显示成功的方案
+            if 'class_details' not in sol or 'slot_schedule' not in sol:
+                continue
+                
             with st.expander(f"📋 {sol['name']} - 详细结果"):
 
                 if 'split_log' in sol:
