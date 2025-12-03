@@ -10,7 +10,6 @@ from pathlib import Path
 import io
 import time
 import threading
-from datetime import datetime
 try:
     from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 except ImportError:
@@ -91,7 +90,8 @@ def parse_subject_string(subject_str):
 # 存储功能相关函数
 def save_solution_to_storage(sol, save_name):
     """保存方案到存储"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     st.session_state['saved_solutions'][save_name] = {
         'solution': sol,
         'timestamp': timestamp,
