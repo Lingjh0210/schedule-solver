@@ -77,12 +77,10 @@ def natural_sort_key(s):
             for text in re.split(r'(\d+)', str(s))]
 
 def parse_subject_string(subject_str):
-    """解析科目字符串（支持中英文括号）
-    输入: "会计(6),历史(4),地理(4),商业(3)" 或 "会计（6）,历史（4）"
-    输出: {'会计': 6, '历史': 4, '地理': 4, '商业': 3}
-    """
+    """解析科目字符串（支持中英文括号及空格）"""
     subjects = {}
-    pattern = r'([^,\(（]+)[\(（](\d+)[\)）]'
+    # 增加 \s* 允许括号周围有空格
+    pattern = r'([^,\(（]+)\s*[\(（]\s*(\d+)\s*[\)）]'
     matches = re.findall(pattern, subject_str)
     for subject, hours in matches:
         subject = subject.strip()
@@ -928,7 +926,9 @@ def on_max_classes_change():
     自动重新计算并更新【最大班额】的建议值
     """
     # 1. 确保有数据且有当前设置
-    if 'packages' not in st.session_state:
+    # 主内容区
+    # 修改逻辑：如果没有 input 数据，且也没有历史结果，才显示欢迎页并退出
+    if 'packages' not in st.session_state and 'solutions' not in st.session_state:
         return
         
 
@@ -1047,27 +1047,42 @@ def preprocess_and_split_packages(original_packages, max_class_size=24):
     
 def analyze_teacher_needs(slot_schedule):
     """
-    分析师资需求：计算每个科目需要的最小教师数量（即最大并发数）
+    分析师资需求：精确到每小时计算最大并发数
     """
     from collections import defaultdict
-    
+    global_slot_usage = defaultdict(lambda: defaultdict(int))
 
     teacher_needs = defaultdict(int)
-    
+
     for slot_data in slot_schedule:
-        # slot_data['display_items'] 包含了该时间段内所有的课
-        current_slot_counts = defaultdict(int)
+        group_time_usage = defaultdict(lambda: defaultdict(int))
         
         for item in slot_data.get('display_items', []):
-            if not item.get('is_gap', False):
-                subj = item['subject']
-                current_slot_counts[subj] += 1
-        
-        # 更新该科目的历史最高记录
-        for subj, count in current_slot_counts.items():
-            if count > teacher_needs[subj]:
-                teacher_needs[subj] = count
+            if item.get('is_gap', False):
+                continue
                 
+            subj = item['subject']
+            # 获取该课占用的相对格子，例如 [0, 1] 表示前两小时
+            relative_slots = item.get('relative_slots', [])
+            
+            # 如果没有 relative_slots (兼容旧逻辑)，尝试解析
+            if not relative_slots:
+                 try:
+                    dur = int(item['duration'].replace('h',''))
+                 except: 
+                    dur = 1
+                 # 这是一个估算，存在风险，最好确保 upstream 传递了 relative_slots
+                 relative_slots = range(dur) 
+
+            for t_idx in relative_slots:
+                group_time_usage[t_idx][subj] += 1
+        
+        # 统计该组内，每个科目在任意时刻的最大并发
+        for t_idx, subj_counts in group_time_usage.items():
+            for subj, count in subj_counts.items():
+                if count > teacher_needs[subj]:
+                    teacher_needs[subj] = count
+                    
     return teacher_needs
 
 # ==============================================================================
@@ -1439,16 +1454,17 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         return
     
     # 显示数据概览
-    st.markdown('<div class="sub-header">📊 数据概览</div>', unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("配套数量", len(st.session_state['packages']))
-    with col2:
-        st.metric("科目数量", len(st.session_state['subject_hours']))
-    with col3:
-        total_students = sum(p['人数'] for p in st.session_state['packages'].values())
-        st.metric("学生总数", total_students)
+    if 'packages' in st.session_state:
+        st.markdown('<div class="sub-header">📊 数据概览</div>', unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("配套数量", len(st.session_state['packages']))
+        with col2:
+            st.metric("科目数量", len(st.session_state['subject_hours']))
+        with col3:
+            total_students = sum(p['人数'] for p in st.session_state['packages'].values())
+            st.metric("学生总数", total_students)
     
     # 配套详情
     with st.expander("查看配套详情"):
