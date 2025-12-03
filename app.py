@@ -1230,179 +1230,29 @@ def main():
                     os.remove(HISTORY_FILE)
                     st.rerun()
         
-        # 已保存的方案管理
         st.markdown("---")
         st.subheader("💾 已保存的方案")
         
         if st.session_state['saved_solutions']:
-            st.caption(f"共有 {len(st.session_state['saved_solutions'])} 个已保存方案")
-            
+            st.caption(f"共 {len(st.session_state['saved_solutions'])} 个方案")
             for save_name in list(st.session_state['saved_solutions'].keys()):
                 saved_data = st.session_state['saved_solutions'][save_name]
                 with st.expander(f"📁 {save_name}"):
-                    st.caption(f"**原方案:** {saved_data['original_name']}")
-                    st.caption(f"**时间:** {saved_data['timestamp']}")
+                    st.caption(f"{saved_data['original_name']}")
+                    st.caption(f"{saved_data['timestamp']}")
                     
                     col1, col2 = st.columns(2)
-                    
-                    # 下载按钮
                     with col1:
-                        sol = saved_data['solution']
-                        output = io.BytesIO()
-                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                            raw_class_data = sol['class_details']
-                            raw_slot_data = sol['slot_schedule']
-                            
-                            df_class = pd.DataFrame(raw_class_data)
-                            
-                            def format_subject_class_col(row):
-                                suffix = row['班级'].replace('班', '')
-                                if suffix:
-                                    return f"{row['科目']} {suffix}"
-                                else:
-                                    return row['科目']
-                            
-                            df_class = df_class.sort_values(by=['科目', '班级'])
-                            df_class['科目 & 班级'] = df_class.apply(format_subject_class_col, axis=1)
-                            df_class_export = df_class[['科目 & 班级', '人数', '时段', '学生配套']]
-                            df_class_export.to_excel(writer, sheet_name='开班详情', index=False)
-                            
-                            df_slot = pd.DataFrame(raw_slot_data)
-                            p1_list, p2_list, p3_list = [], [], []
-                            
-                            for item in raw_slot_data:
-                                current_pkg_slots = ["-", "-", "-"]
-                                d_items = item.get('display_items', [])
-                                
-                                if isinstance(d_items, list):
-                                    for sub_item in d_items:
-                                        pkg_str = sub_item.get('packages_str', '-')
-                                        if not pkg_str or sub_item.get('is_gap', False):
-                                            pkg_str = "-"
-                                        
-                                        rel_slots = sub_item.get('relative_slots', [])
-                                        if not rel_slots and 'start_offset' in sub_item:
-                                            try: dur = int(sub_item['duration'].replace('h',''))
-                                            except: dur = 1
-                                            start = sub_item['start_offset']
-                                            rel_slots = range(start, start + dur)
-                                            
-                                        for idx in rel_slots:
-                                            if 0 <= idx < 3:
-                                                current_pkg_slots[idx] = pkg_str
-                                
-                                p1_list.append(current_pkg_slots[0])
-                                p2_list.append(current_pkg_slots[1])
-                                p3_list.append(current_pkg_slots[2])
-                            
-                            df_slot['配套 (第1小时)'] = p1_list
-                            df_slot['配套 (第2小时)'] = p2_list
-                            df_slot['配套 (第3小时)'] = p3_list
-                            
-                            drops = ['display_items', 'sort_key_subject', '涉及配套']
-                            df_slot = df_slot.drop(columns=[c for c in drops if c in df_slot.columns])
-                            
-                            base_cols = [c for c in df_slot.columns if '配套' not in c]
-                            new_cols = ['配套 (第1小时)', '配套 (第2小时)', '配套 (第3小时)']
-                            df_slot = df_slot[base_cols + new_cols]
-                            
-                            df_slot.to_excel(writer, sheet_name='时段总表', index=False)
-                            
-                            from openpyxl.styles import Alignment, Border, Side
-                            
-                            ws_slot = writer.sheets['时段总表']
-                            col_pkg_start = 5
-                            
-                            thick_border = Border(bottom=Side(style='thick', color='000000'))
-                            thin_border = Border(bottom=Side(style='thin', color='D3D3D3'))
-                            center_align = Alignment(horizontal='center', vertical='center')
-                            
-                            max_row = len(df_slot) + 1
-                            slot_merge_start = 2
-                            
-                            for r_idx in range(2, max_row + 2):
-                                cell1 = ws_slot.cell(row=r_idx, column=col_pkg_start)
-                                cell2 = ws_slot.cell(row=r_idx, column=col_pkg_start+1)
-                                cell3 = ws_slot.cell(row=r_idx, column=col_pkg_start+2)
-                                
-                                val1, val2, val3 = cell1.value, cell2.value, cell3.value
-                                
-                                if val1 == val2 == val3 and val1 != '-':
-                                    ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start, end_row=r_idx, end_column=col_pkg_start+2)
-                                    cell1.alignment = center_align
-                                elif val1 == val2 and val1 != '-':
-                                    ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start, end_row=r_idx, end_column=col_pkg_start+1)
-                                    cell1.alignment = center_align
-                                    cell3.alignment = center_align
-                                elif val2 == val3 and val2 != '-':
-                                    ws_slot.merge_cells(start_row=r_idx, start_column=col_pkg_start+1, end_row=r_idx, end_column=col_pkg_start+2)
-                                    cell2.alignment = center_align
-                                    cell1.alignment = center_align
-                                else:
-                                    cell1.alignment = center_align
-                                    cell2.alignment = center_align
-                                    cell3.alignment = center_align
-                                
-                                current_slot = ws_slot.cell(row=r_idx, column=1).value
-                                next_slot = None
-                                if r_idx < max_row + 1:
-                                    next_slot = ws_slot.cell(row=r_idx+1, column=1).value
-                                
-                                if current_slot != next_slot:
-                                    ws_slot.merge_cells(start_row=slot_merge_start, start_column=1, end_row=r_idx, end_column=1)
-                                    ws_slot.merge_cells(start_row=slot_merge_start, start_column=2, end_row=r_idx, end_column=2)
-                                    
-                                    ws_slot.cell(row=slot_merge_start, column=1).alignment = center_align
-                                    ws_slot.cell(row=slot_merge_start, column=2).alignment = center_align
-                                    
-                                    for c_idx in range(1, 8):
-                                        cell = ws_slot.cell(row=r_idx, column=c_idx)
-                                        cell.border = thick_border
-                                    
-                                    slot_merge_start = r_idx + 1
-                                else:
-                                    for c_idx in range(1, 8):
-                                        ws_slot.cell(row=r_idx, column=c_idx).border = thin_border
-                            
-                            df_overview = df_class_export[['科目 & 班级', '学生配套', '人数']].copy()
-                            df_overview.columns = ['科目 SUBJECT', '配套 PACKAGE', '人数']
-                            df_overview.to_excel(writer, sheet_name='导入', index=False)
-                            
-                            workbook = writer.book
-                            for sheet_name in writer.sheets:
-                                worksheet = writer.sheets[sheet_name]
-                                if sheet_name == '时段总表':
-                                    df_to_measure = df_slot
-                                elif sheet_name == '导入':
-                                    df_to_measure = df_overview
-                                else:
-                                    df_to_measure = df_class_export
-                                    
-                                for idx, col in enumerate(df_to_measure.columns):
-                                    max_len = max(
-                                        len(str(col)),
-                                        df_to_measure[col].astype(str).str.len().max() if not df_to_measure[col].empty else 0
-                                    )
-                                    adjusted_width = min(max_len + 4, 60)
-                                    worksheet.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
-                        
-                        st.download_button(
-                            label="📥",
-                            data=output.getvalue(),
-                            file_name=f"{save_name}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key=f"dl_saved_{save_name}"
-                        )
-                    
-                    # 删除按钮
+                        if st.button("📥", key=f"view_{save_name}"):
+                            st.session_state['solutions'] = [saved_data['solution']]
+                            st.rerun()
                     with col2:
-                        if st.button("🗑️", key=f"del_saved_{save_name}"):
+                        if st.button("🗑️", key=f"del_{save_name}"):
                             delete_saved_solution(save_name)
                             st.rerun()
         else:
-            st.caption("暂无已保存的方案")
+            st.caption("暂无保存")
         
-        st.markdown("---")
         st.subheader("📁 数据导入")
         
         # 下载模板功能
@@ -2404,31 +2254,28 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                     
-                    # 保存到存储功能
                     st.markdown("---")
                     st.markdown("#### 💾 保存方案")
                     
                     col1, col2 = st.columns([4, 1])
-                    
                     with col1:
                         save_name = st.text_input(
                             "输入存储名称",
                             placeholder="例如：2024秋季排课_最终版",
                             key=f"save_name_{sol['name']}"
                         )
-                    
                     with col2:
                         st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("💾 保存", key=f"save_btn_{sol['name']}"):
+                        if st.button("💾 保存", key=f"save_{sol['name']}"):
                             if save_name:
                                 if save_name in st.session_state['saved_solutions']:
-                                    st.warning(f"⚠️ 名称 '{save_name}' 已存在")
+                                    st.warning(f"⚠️ '{save_name}' 已存在")
                                 else:
                                     save_solution_to_storage(sol, save_name)
-                                    st.success(f"✅ 已保存：{save_name}")
+                                    st.success(f"✅ 已保存")
                                     time.sleep(1)
                                     st.rerun()
                             else:
-                                st.error("❌ 请输入存储名称！")
+                                st.error("❌ 请输入名称")
 if __name__ == "__main__":
     main()
