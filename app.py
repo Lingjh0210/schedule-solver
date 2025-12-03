@@ -925,6 +925,9 @@ def on_max_classes_change():
     当【每科目最大班数】改变时触发：
     自动重新计算并更新【最大班额】的建议值
     """
+    # 1. 确保有数据且有当前设置
+    # 主内容区
+    # 修改逻辑：如果没有 input 数据，且也没有历史结果，才显示欢迎页并退出
     if 'packages' not in st.session_state and 'solutions' not in st.session_state:
         return
         
@@ -1409,28 +1412,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             min_value=10, max_value=100, value=24, step=1,
             help="当配套人数超过此数值时，自动拆分为多个小配套（方案D专用）"
         )
-        
-        # === ✨ 新增：方案选择器 ✨ ===
-        st.markdown("---")
-        st.subheader("🎯 方案选择")
-        
-        # 定义选项映射
-        SCHEME_OPTIONS = [
-            "方案A: 最少开班 ",
-            "方案B: 避免拥挤",
-            "方案C: 强控30人",
-            "方案D: 维修中"
-        ]
-        
-        # 多选框，默认全选
-        selected_schemes_ui = st.multiselect(
-            "勾选需要运行的方案",
-            options=SCHEME_OPTIONS,
-            default=SCHEME_OPTIONS,
-            help="取消勾选不需要的方案可节省计算时间"
-        )
-        # ============================
-        
         st.markdown("---")
         
         st.subheader("🔒 强制开班")
@@ -1485,26 +1466,26 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             total_students = sum(p['人数'] for p in st.session_state['packages'].values())
             st.metric("学生总数", total_students)
     
-        # 配套详情
-        with st.expander("查看配套详情"):
-            df_packages = []
-            for name, data in st.session_state['packages'].items():
-                subjects_str = ', '.join([f"{k}({v}h)" for k, v in data['科目'].items()])
-                df_packages.append({
-                    '配套': name,
-                    '人数': data['人数'],
-                    '科目': subjects_str
-                })
-            st.dataframe(pd.DataFrame(df_packages), use_container_width=True)
-        
-        # 科目选修统计
-        with st.expander("查看科目选修统计"):
-            enrollment = calculate_subject_enrollment(st.session_state['packages'])
-            df_enrollment = pd.DataFrame([
-                {'科目': k, '课时': st.session_state['subject_hours'][k], '选修人数': enrollment[k]}
-                for k in sorted(enrollment.keys(), key=lambda x: enrollment[x], reverse=True)
-            ])
-            st.dataframe(df_enrollment, use_container_width=True)
+    # 配套详情
+    with st.expander("查看配套详情"):
+        df_packages = []
+        for name, data in st.session_state['packages'].items():
+            subjects_str = ', '.join([f"{k}({v}h)" for k, v in data['科目'].items()])
+            df_packages.append({
+                '配套': name,
+                '人数': data['人数'],
+                '科目': subjects_str
+            })
+        st.dataframe(pd.DataFrame(df_packages), use_container_width=True)
+    
+    # 科目选修统计
+    with st.expander("查看科目选修统计"):
+        enrollment = calculate_subject_enrollment(st.session_state['packages'])
+        df_enrollment = pd.DataFrame([
+            {'科目': k, '课时': st.session_state['subject_hours'][k], '选修人数': enrollment[k]}
+            for k in sorted(enrollment.keys(), key=lambda x: enrollment[x], reverse=True)
+        ])
+        st.dataframe(df_enrollment, use_container_width=True)
     
     st.markdown("---")
     
@@ -1571,26 +1552,12 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             config
         )
         
-        # === ✨ 修改：根据选择动态生成配置 ✨ ===
-        if not selected_schemes_ui:
-            st.error("❌ 请至少选择一个方案！")
-            return # 停止运行
-
-        solution_configs = []
-        
-        # 按顺序判断，确保运行顺序 A->B->C->D
-        if "方案A: 最少开班 (传统模式)" in selected_schemes_ui:
-            solution_configs.append({'type': 'min_classes', 'name': '方案A：最少开班'})
-            
-        if "方案B: 全局均衡 (避免拥挤)" in selected_schemes_ui:
-            solution_configs.append({'type': 'balanced', 'name': '方案B：全局均衡'})
-            
-        if "方案C: 精品小班 (强控30人)" in selected_schemes_ui:
-            solution_configs.append({'type': 'subject_balanced', 'name': '方案C：精品小班(上限30人)'})
-            
-        if "方案D: 自动拆分 (解决超大班)" in selected_schemes_ui:
-            solution_configs.append({'type': 'auto_split', 'name': f'方案D：自动拆分(上限{scheme_d_limit}人)'})
-        # ======================================
+        solution_configs = [
+            {'type': 'min_classes', 'name': '方案A：最少开班'},
+            {'type': 'balanced', 'name': '方案B：全局均衡'},
+            {'type': 'subject_balanced', 'name': '方案C：精品小班(上限30人)'},
+            {'type': 'auto_split', 'name': f'方案D：自动拆分(上限{scheme_d_limit}人)'} 
+        ]
         
         # 进度条初始化
         progress_container = st.container()
