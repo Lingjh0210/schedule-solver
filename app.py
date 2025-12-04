@@ -1172,6 +1172,23 @@ def main():
         # 从磁盘加载已保存的方案
         st.session_state['saved_solutions'] = load_saved_solutions_from_disk()
     
+    # 自动加载最近的历史记录（如果当前没有加载任何方案）
+    if 'solutions' not in st.session_state:
+        history_records = load_history_from_disk()
+        if history_records:
+            # 加载最后两次的历史记录
+            recent_records = list(reversed(history_records))[:2]  # 取最近2条
+            
+            # 合并所有方案到一个列表
+            all_solutions = []
+            for record in recent_records:
+                all_solutions.extend(record['data'])
+            
+            if all_solutions:
+                st.session_state['solutions'] = all_solutions
+                st.session_state['auto_loaded'] = True  # 标记为自动加载
+                st.session_state['auto_load_count'] = len(recent_records)  # 记录加载了几次历史
+    
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #666;">走班制排课搜索系统</p>', unsafe_allow_html=True)
     # ... (st.set_page_config 之后) ...
@@ -1194,7 +1211,10 @@ def main():
     with st.sidebar:
         st.header("⚙️ 系统配置")
         st.markdown("---")
-        st.subheader("📜 历史记录 (Local)")
+        st.subheader("📜 历史记录")
+        st.caption("✨ **自动加载**：页面刷新后会自动加载最近2次的求解记录，无需上传配套即可查看")
+        st.caption(f"📊 保留最近 10 次记录 | 当前: {len(load_history_from_disk())} 条")
+        
         history_records = load_history_from_disk()
         
         if not history_records:
@@ -1221,9 +1241,10 @@ def main():
         
         st.markdown("---")
         st.subheader("💾 已保存的方案")
+        st.caption("⚠️ **注意**：在 Streamlit Cloud 上，保存的方案会在应用重启后丢失。如需永久保存，请下载Excel文件。")
         
         if st.session_state['saved_solutions']:
-            st.caption(f"共 {len(st.session_state['saved_solutions'])} 个方案")
+            st.caption(f"✅ 当前共 {len(st.session_state['saved_solutions'])} 个方案")
             for save_name in list(st.session_state['saved_solutions'].keys()):
                 saved_data = st.session_state['saved_solutions'][save_name]
                 with st.expander(f"📁 {save_name}"):
@@ -1845,11 +1866,18 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         st.markdown("---")
         
         # 如果是从历史记录或保存的方案加载的，显示提示
-        if st.session_state.get('from_history', False):
+        if st.session_state.get('auto_loaded', False):
+            count = st.session_state.get('auto_load_count', 1)
+            st.success(f"🎉 已自动加载最近 {count} 次的求解记录（共 {len(st.session_state['solutions'])} 个方案）")
+            st.info("💡 **提示**：不需要上传配套也能查看历史记录，页面刷新后会自动加载最近的记录")
+            st.session_state['auto_loaded'] = False  # 显示后清除标记
+        elif st.session_state.get('from_history', False):
             st.info("📂 当前显示的是从历史记录加载的方案")
+            st.caption("💡 不需要上传配套数据即可查看")
             st.session_state['from_history'] = False  # 显示后清除标记
         elif st.session_state.get('from_saved', False):
             st.info("📁 当前显示的是从已保存方案加载的内容")
+            st.caption("💡 不需要上传配套数据即可查看")
             st.session_state['from_saved'] = False  # 显示后清除标记
         
         st.markdown('<div class="sub-header">📊 方案对比</div>', unsafe_allow_html=True)
