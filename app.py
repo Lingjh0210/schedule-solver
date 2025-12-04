@@ -88,52 +88,20 @@ def parse_subject_string(subject_str):
     return subjects
 
 # 存储功能相关函数
-SAVED_SOLUTIONS_FILE = "saved_solutions.pkl"
-
-def load_saved_solutions_from_disk():
-    """从本地磁盘加载已保存的方案"""
-    if not os.path.exists(SAVED_SOLUTIONS_FILE):
-        return {}
-    try:
-        with open(SAVED_SOLUTIONS_FILE, 'rb') as f:
-            return pickle.load(f)
-    except:
-        return {}
-
-def save_saved_solutions_to_disk(saved_solutions):
-    """将已保存的方案写入本地磁盘"""
-    try:
-        with open(SAVED_SOLUTIONS_FILE, 'wb') as f:
-            pickle.dump(saved_solutions, f)
-        return True
-    except Exception as e:
-        print(f"❌ 保存方案到磁盘失败: {e}")
-        return False
-
 def save_solution_to_storage(sol, save_name):
     """保存方案到存储"""
     import datetime
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # 保存到 session_state
     st.session_state['saved_solutions'][save_name] = {
         'solution': sol,
         'timestamp': timestamp,
         'original_name': sol['name']
     }
-    
-    # 同步到磁盘
-    if save_saved_solutions_to_disk(st.session_state['saved_solutions']):
-        st.toast(f"💾 方案已保存到本地", icon="✅")
-    else:
-        st.toast(f"⚠️ 保存到磁盘失败", icon="❌")
 
 def delete_saved_solution(save_name):
     """删除已保存的方案"""
     if save_name in st.session_state['saved_solutions']:
         del st.session_state['saved_solutions'][save_name]
-        # 同步到磁盘
-        save_saved_solutions_to_disk(st.session_state['saved_solutions'])
 
 # Read Excel File
 def parse_uploaded_file(uploaded_file):
@@ -1000,6 +968,46 @@ import os
 
 HISTORY_FILE = "schedule_history.pkl"
 
+def save_history_to_disk(current_solutions):
+    """
+    将当前方案保存到本地文件，仅保留最后 2 次记录
+    """
+    if not current_solutions:
+        return
+    
+    # 1. 清洗数据：移除不可序列化的对象 (如 solver 引擎, variables 变量)
+    # 我们只保存用于展示的数据 (analysis, class_details, slot_schedule)
+    sanitized_solutions = []
+    for sol in current_solutions:
+        safe_sol = {k: v for k, v in sol.items() if k not in ['solver', 'variables']}
+        sanitized_solutions.append(safe_sol)
+    
+    # 2. 读取现有历史
+    history = []
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, 'rb') as f:
+                history = pickle.load(f)
+        except:
+            history = [] # 如果文件损坏，重置
+    
+    # 3. 追加新记录 (作为一个整体)
+    # 格式: [{'time': '10:00', 'data': [方案A, 方案B...]}]
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%m-%d %H:%M")
+    
+    # 避免重复保存相同的数据
+    if not history or history[-1]['data'] != sanitized_solutions:
+        history.append({'time': timestamp, 'data': sanitized_solutions})
+    
+    # 4. 只保留最后 2 场
+    if len(history) > 2:
+        history = history[-2:]
+        
+    # 5. 写入磁盘
+    with open(HISTORY_FILE, 'wb') as f:
+        pickle.dump(history, f)
+
 def load_history_from_disk():
     """读取本地历史记录"""
     if not os.path.exists(HISTORY_FILE):
@@ -1142,8 +1150,7 @@ def save_history_to_disk(current_solutions):
             history = []
     
     # 3. 追加新记录
-    import datetime
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.datetime.now().strftime("%m-%d %H:%M")
     # 避免重复保存完全一样的数据
     if not history or history[-1]['data'] != sanitized_solutions:
         history.append({'time': timestamp, 'data': sanitized_solutions})
@@ -1151,9 +1158,9 @@ def save_history_to_disk(current_solutions):
     else:
         print("⚠️ 数据未变，跳过保存")
     
-    # 4. 限制数量（保留最近10条）
-    if len(history) > 10:
-        history = history[-10:]
+    # 4. 限制数量
+    if len(history) > 2:
+        history = history[-2:]
         
     # 5. 写入
     try:
@@ -1164,30 +1171,19 @@ def save_history_to_disk(current_solutions):
     except Exception as e:
         st.error(f"❌ 保存文件失败: {str(e)}")
         print(f"❌ 保存错误: {e}")
+
+def load_history_from_disk():
+    if not os.path.exists(HISTORY_FILE): return []
+    try:
+        with open(HISTORY_FILE, 'rb') as f:
+            return pickle.load(f)
+    except: return []
         
 # main design
 def main():
     # 初始化 session_state 用于保存方案
     if 'saved_solutions' not in st.session_state:
-        # 从磁盘加载已保存的方案
-        st.session_state['saved_solutions'] = load_saved_solutions_from_disk()
-    
-    # 自动加载最近的历史记录（如果当前没有加载任何方案）
-    if 'solutions' not in st.session_state:
-        history_records = load_history_from_disk()
-        if history_records:
-            # 加载最后两次的历史记录
-            recent_records = list(reversed(history_records))[:2]  # 取最近2条
-            
-            # 合并所有方案到一个列表
-            all_solutions = []
-            for record in recent_records:
-                all_solutions.extend(record['data'])
-            
-            if all_solutions:
-                st.session_state['solutions'] = all_solutions
-                st.session_state['auto_loaded'] = True  # 标记为自动加载
-                st.session_state['auto_load_count'] = len(recent_records)  # 记录加载了几次历史
+        st.session_state['saved_solutions'] = {}
     
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #666;">走班制排课搜索系统</p>', unsafe_allow_html=True)
@@ -1211,10 +1207,7 @@ def main():
     with st.sidebar:
         st.header("⚙️ 系统配置")
         st.markdown("---")
-        st.subheader("📜 历史记录")
-        st.caption("✨ **自动加载**：页面刷新后会自动加载最近2次的求解记录，无需上传配套即可查看")
-        st.caption(f"📊 保留最近 10 次记录 | 当前: {len(load_history_from_disk())} 条")
-        
+        st.subheader("📜 历史记录 (Local)")
         history_records = load_history_from_disk()
         
         if not history_records:
@@ -1227,24 +1220,21 @@ def main():
                 
                 # 使用唯一的 key 防止冲突
                 if st.button(btn_label, key=f"hist_btn_{idx}", use_container_width=True):
-                    # 加载历史记录
                     st.session_state['solutions'] = record['data']
-                    st.session_state['from_history'] = True  # 标记来自历史记录
-                    st.toast(f"✅ 已加载 {record['time']} 的排课结果！共{len(record['data'])}个方案", icon="🎉")
+                    st.toast(f"已恢复 {record['time']} 的排课结果！", icon="🎉")
+                    time.sleep(1)
                     st.rerun() # 立即刷新页面以显示结果
             
             if st.button("🗑️ 清空历史", type="secondary", key="clear_hist"):
                 if os.path.exists(HISTORY_FILE):
                     os.remove(HISTORY_FILE)
-                    st.toast("✅ 历史记录已清空", icon="🗑️")
                     st.rerun()
         
         st.markdown("---")
         st.subheader("💾 已保存的方案")
-        st.caption("⚠️ **注意**：在 Streamlit Cloud 上，保存的方案会在应用重启后丢失。如需永久保存，请下载Excel文件。")
         
         if st.session_state['saved_solutions']:
-            st.caption(f"✅ 当前共 {len(st.session_state['saved_solutions'])} 个方案")
+            st.caption(f"共 {len(st.session_state['saved_solutions'])} 个方案")
             for save_name in list(st.session_state['saved_solutions'].keys()):
                 saved_data = st.session_state['saved_solutions'][save_name]
                 with st.expander(f"📁 {save_name}"):
@@ -1255,35 +1245,14 @@ def main():
                     with col1:
                         if st.button("📥", key=f"view_{save_name}"):
                             st.session_state['solutions'] = [saved_data['solution']]
-                            st.session_state['from_saved'] = True  # 标记来自保存方案
-                            st.toast(f"✅ 已加载方案: {save_name}", icon="📁")
                             st.rerun()
                     with col2:
                         if st.button("🗑️", key=f"del_{save_name}"):
                             delete_saved_solution(save_name)
-                            st.toast(f"🗑️ 已删除方案: {save_name}", icon="🗑️")
                             st.rerun()
         else:
             st.caption("暂无保存")
         
-        st.markdown("---")
-        
-        # 调试信息
-        with st.expander("🔍 系统状态", expanded=False):
-            if 'solutions' in st.session_state:
-                st.success(f"✅ 当前加载: {len(st.session_state['solutions'])} 个方案")
-                for i, sol in enumerate(st.session_state['solutions']):
-                    name = sol.get('name', '未知')
-                    has_details = '✅' if 'class_details' in sol else '❌'
-                    has_schedule = '✅' if 'slot_schedule' in sol else '❌'
-                    st.caption(f"{i+1}. {name} (详情:{has_details} 时段:{has_schedule})")
-            else:
-                st.info("暂无加载的方案")
-            
-            st.caption(f"📜 历史记录: {len(load_history_from_disk())} 条")
-            st.caption(f"💾 保存方案: {len(st.session_state['saved_solutions'])} 个")
-        
-        st.markdown("---")
         st.subheader("📁 数据导入")
         
         # 下载模板功能
@@ -1582,60 +1551,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
     
     st.markdown("---")
     
-    # ========== 最近求解记录（自动显示）==========
-    st.markdown('<div class="sub-header">📋 最近求解记录</div>', unsafe_allow_html=True)
-    
-    # 加载最近2次历史记录
-    recent_history = load_history_from_disk()
-    
-    if recent_history:
-        # 只显示最近2次
-        display_records = list(reversed(recent_history))[:2]
-        
-        if len(display_records) > 0:
-            st.caption(f"自动显示最近 {len(display_records)} 次求解结果（无需上传配套）")
-            
-            for idx, record in enumerate(display_records):
-                with st.expander(f"📊 {record['time']} - 共 {len(record['data'])} 个方案", expanded=(idx==0)):
-                    # 显示方案对比表格
-                    comparison_data = []
-                    for sol in record['data']:
-                        if 'analysis' in sol:
-                            analysis = sol['analysis']
-                            comparison_data.append({
-                                '方案': sol['name'],
-                                '开班数': analysis['total_classes'],
-                                '平均班额': f"{analysis['avg_size']}人",
-                                '班额范围': f"{analysis['min_size']}-{analysis['max_size']}人",
-                                '时段分割': analysis['split_count'],
-                                '状态': sol.get('icon', '✅')
-                            })
-                        else:
-                            comparison_data.append({
-                                '方案': sol.get('name', '未知'),
-                                '开班数': '-',
-                                '平均班额': '-',
-                                '班额范围': '-',
-                                '时段分割': '-',
-                                '状态': sol.get('icon', '❌')
-                            })
-                    
-                    if comparison_data:
-                        df_comparison = pd.DataFrame(comparison_data)
-                        st.dataframe(df_comparison, use_container_width=True)
-                    
-                    # 加载按钮
-                    col1, col2 = st.columns([4, 1])
-                    with col2:
-                        if st.button("📥 加载到主界面", key=f"load_recent_{idx}", use_container_width=True):
-                            st.session_state['solutions'] = record['data']
-                            st.session_state['from_history'] = True
-                            st.toast(f"✅ 已加载 {record['time']} 的方案", icon="🎉")
-                            st.rerun()
-    else:
-        st.info("暂无历史记录。完成第一次求解后，这里会自动显示最近的结果。")
-    
-    st.markdown("---")
 
     current_config = {
         'min_class_size': min_class_size,
@@ -1864,81 +1779,25 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
     
     if 'solutions' in st.session_state:
         st.markdown("---")
-        
-        # 如果是从历史记录或保存的方案加载的，显示提示
-        if st.session_state.get('auto_loaded', False):
-            count = st.session_state.get('auto_load_count', 1)
-            st.success(f"🎉 已自动加载最近 {count} 次的求解记录（共 {len(st.session_state['solutions'])} 个方案）")
-            st.info("💡 **提示**：不需要上传配套也能查看历史记录，页面刷新后会自动加载最近的记录")
-            st.session_state['auto_loaded'] = False  # 显示后清除标记
-        elif st.session_state.get('from_history', False):
-            st.info("📂 当前显示的是从历史记录加载的方案")
-            st.caption("💡 不需要上传配套数据即可查看")
-            st.session_state['from_history'] = False  # 显示后清除标记
-        elif st.session_state.get('from_saved', False):
-            st.info("📁 当前显示的是从已保存方案加载的内容")
-            st.caption("💡 不需要上传配套数据即可查看")
-            st.session_state['from_saved'] = False  # 显示后清除标记
-        
         st.markdown('<div class="sub-header">📊 方案对比</div>', unsafe_allow_html=True)
-        
-        # 显示方案数量
-        st.caption(f"共 {len(st.session_state['solutions'])} 个方案")
         
         comparison_data = []
         for sol in st.session_state['solutions']:
-            # 检查方案是否成功
-            if 'analysis' in sol:
-                analysis = sol['analysis']
-                comparison_data.append({
-                    '方案': sol['name'],
-                    '开班数': analysis['total_classes'],
-                    '平均班额': f"{analysis['avg_size']}人",
-                    '班额范围': f"{analysis['min_size']}-{analysis['max_size']}人",
-                    '时段分割次数': analysis['split_count'],
-                    '求解时间': f"{sol.get('solve_time', 0):.1f}秒",
-                    '状态': sol.get('icon', '✅')
-                })
-            else:
-                # 失败的方案
-                comparison_data.append({
-                    '方案': sol.get('name', '未知方案'),
-                    '开班数': '-',
-                    '平均班额': '-',
-                    '班额范围': '-',
-                    '时段分割次数': '-',
-                    '求解时间': f"{sol.get('solve_time', 0):.1f}秒",
-                    '状态': sol.get('icon', '❌')
-                })
+            analysis = sol['analysis']
+            comparison_data.append({
+                '方案': sol['name'],
+                '开班数': analysis['total_classes'],
+                '平均班额': f"{analysis['avg_size']}人",
+                '班额范围': f"{analysis['min_size']}-{analysis['max_size']}人",
+                '时段分割次数': analysis['split_count'],
+                '求解时间': f"{sol['solve_time']:.1f}秒",
+                '状态': sol['icon']
+            })
         
-        if comparison_data:
-            df_comparison = pd.DataFrame(comparison_data)
-            st.dataframe(df_comparison, use_container_width=True)
-        else:
-            st.info("没有可显示的方案数据")
+        df_comparison = pd.DataFrame(comparison_data)
+        st.dataframe(df_comparison, use_container_width=True)
         
         for sol in st.session_state['solutions']:
-            # 检查方案数据完整性
-            has_details = 'class_details' in sol
-            has_schedule = 'slot_schedule' in sol
-            has_analysis = 'analysis' in sol
-            
-            # 如果数据不完整，显示警告
-            if not (has_details and has_schedule):
-                with st.expander(f"⚠️ {sol.get('name', '未知方案')} - 数据不完整", expanded=False):
-                    st.warning("此方案的数据不完整，无法显示详细信息")
-                    st.caption("可能原因：")
-                    st.caption("- 方案求解失败")
-                    st.caption("- 历史记录数据格式较旧")
-                    st.caption("- 数据保存时出现问题")
-                    if not has_details:
-                        st.caption("❌ 缺少: class_details (开班详情)")
-                    if not has_schedule:
-                        st.caption("❌ 缺少: slot_schedule (时段总表)")
-                    if not has_analysis:
-                        st.caption("❌ 缺少: analysis (统计分析)")
-                continue
-                
             with st.expander(f"📋 {sol['name']} - 详细结果"):
 
                 if 'split_log' in sol:
