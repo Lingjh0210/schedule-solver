@@ -87,6 +87,16 @@ def parse_subject_string(subject_str):
         subjects[subject] = int(hours)
     return subjects
 
+# 时区函数
+def get_malaysia_time():
+    """获取马来西亚时间（UTC+8）"""
+    import datetime
+    # 获取UTC时间
+    utc_now = datetime.datetime.utcnow()
+    # 转换为马来西亚时间（UTC+8）
+    malaysia_time = utc_now + datetime.timedelta(hours=8)
+    return malaysia_time
+
 # 存储功能相关函数
 SAVED_SOLUTIONS_FILE = "saved_solutions.pkl"
 
@@ -112,8 +122,7 @@ def save_saved_solutions_to_disk(saved_solutions):
 
 def save_solution_to_storage(sol, save_name):
     """保存方案到存储"""
-    import datetime
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_malaysia_time().strftime("%Y-%m-%d %H:%M:%S")
     
     # 保存到 session_state
     st.session_state['saved_solutions'][save_name] = {
@@ -1142,8 +1151,7 @@ def save_history_to_disk(current_solutions):
             history = []
     
     # 3. 追加新记录
-    import datetime
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_malaysia_time().strftime("%Y-%m-%d %H:%M:%S")
     # 避免重复保存完全一样的数据
     if not history or history[-1]['data'] != sanitized_solutions:
         history.append({'time': timestamp, 'data': sanitized_solutions})
