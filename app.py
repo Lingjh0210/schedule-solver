@@ -1213,6 +1213,11 @@ def main():
                     # 加载历史记录
                     st.session_state['solutions'] = record['data']
                     st.session_state['from_history'] = True  # 标记来自历史记录
+                    
+                    # 添加调试信息
+                    st.session_state['debug_loaded'] = True
+                    st.session_state['debug_solutions_count'] = len(record['data'])
+                    
                     st.toast(f"✅ 已加载 {record['time']} 的排课结果！共{len(record['data'])}个方案", icon="🎉")
                     st.rerun() # 立即刷新页面以显示结果
             
@@ -1253,6 +1258,12 @@ def main():
         
         # 调试信息
         with st.expander("🔍 系统状态", expanded=False):
+            # 显示调试信息
+            if st.session_state.get('debug_loaded', False):
+                st.success("✅ 上次加载成功")
+                st.caption(f"加载的方案数: {st.session_state.get('debug_solutions_count', 0)}")
+                st.session_state['debug_loaded'] = False  # 显示后清除
+            
             if 'solutions' in st.session_state:
                 st.success(f"✅ 当前加载: {len(st.session_state['solutions'])} 个方案")
                 for i, sol in enumerate(st.session_state['solutions']):
@@ -1847,6 +1858,9 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
     
     if 'solutions' in st.session_state:
         st.markdown("---")
+        
+        # 🔥 调试信息：确认进入显示方案的代码块
+        st.success(f"🔍 调试：检测到 {len(st.session_state['solutions'])} 个方案待显示")
         
         # 如果是从历史记录或保存的方案加载的，显示提示
         if st.session_state.get('from_history', False):
