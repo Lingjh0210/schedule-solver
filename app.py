@@ -995,7 +995,7 @@ def on_max_classes_change():
     raw_new_size = math.ceil(max_student_count / current_max_classes)
     suggested_new_size = raw_new_size + 3
     raw_new_size_min = math.ceil(min_student_count / current_max_classes)
-    suggested_new_size = raw_new_size_min - 2
+    suggested_new_size_min = raw_new_size_min - 2
     
 
     st.session_state['param_max_size'] = int(suggested_new_size)
