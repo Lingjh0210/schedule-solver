@@ -1376,7 +1376,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                     defaults = calculate_smart_defaults(packages, subject_hours)
                     
                     # 直接更新 session_state，这会改变下方输入框的默认值
-                    st.session_state['param_max_size'] = defaults['min_class_size']
+                    st.session_state['param_min_size'] = defaults['min_class_size']
                     st.session_state['param_max_size'] = defaults['max_class_size']
                     st.session_state['param_num_slots'] = defaults['num_slots']
                     
