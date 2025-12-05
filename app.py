@@ -1255,28 +1255,6 @@ def main():
         
         st.markdown("---")
         
-        # 调试信息
-        with st.expander("🔍 系统状态", expanded=False):
-            # 显示调试信息
-            if st.session_state.get('debug_loaded', False):
-                st.success("✅ 上次加载成功")
-                st.caption(f"加载的方案数: {st.session_state.get('debug_solutions_count', 0)}")
-                st.session_state['debug_loaded'] = False  # 显示后清除
-            
-            if 'solutions' in st.session_state:
-                st.success(f"✅ 当前加载: {len(st.session_state['solutions'])} 个方案")
-                for i, sol in enumerate(st.session_state['solutions']):
-                    name = sol.get('name', '未知')
-                    has_details = '✅' if 'class_details' in sol else '❌'
-                    has_schedule = '✅' if 'slot_schedule' in sol else '❌'
-                    st.caption(f"{i+1}. {name} (详情:{has_details} 时段:{has_schedule})")
-            else:
-                st.info("暂无加载的方案")
-            
-            st.caption(f"📜 历史记录: {len(load_history_from_disk())} 条")
-            st.caption(f"💾 保存方案: {len(st.session_state['saved_solutions'])} 个")
-        
-        st.markdown("---")
         st.subheader("📁 数据导入")
         
         # 下载模板功能
