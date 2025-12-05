@@ -932,7 +932,7 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     elif min_student_count > 6:
         suggested_min_size = max(1, min_student_count-2)
     else:
-        suggested_new_size = min_student_count
+        suggested_min_size = min_student_count
 
 
     max_student_count = max(enrollment.values())
