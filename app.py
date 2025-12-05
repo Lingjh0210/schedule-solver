@@ -845,8 +845,7 @@ class ScheduleSolver:
                     '时段': group_name,
                     '时长': f"{sum(i['raw_hours'] for i in row_items)}h",
                     '科目 & 班级': merged_info,
-                    '人数': unique_count,
-                    'display_count': display_count_str, # <--- 新增这一行
+                    '人数': display_count_str,
                     '涉及配套': merged_packages,
                     'display_items': display_list,
                     'sort_key_subject': row_items[0]['subject'] if row_items else ""
