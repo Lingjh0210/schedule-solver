@@ -811,8 +811,19 @@ class ScheduleSolver:
                 for i in row_items:
                     for p in i['raw_packages']: unique_pkgs.add(p)
                 unique_count = sum(self.packages[p]['人数'] for p in unique_pkgs)
-                
-                # UI Display Items
+
+
+                if len([i for i in row_items if not i['is_gap']]) > 1:
+                    # 过滤掉 gap (空档)，只统计有课的时段
+                    segment_counts = []
+                    for i in row_items:
+                        if not i['is_gap']:
+                            seg_size = sum(self.packages[p]['人数'] for p in set(i['raw_packages']))
+                            segment_counts.append(str(seg_size))
+                    display_count_str = ", ".join(segment_counts)
+                else:
+                    display_count_str = str(unique_count)
+
                 display_list = []
                 for idx, item in enumerate(row_items):
                     ui_class = item['class_name'].replace('班', '')
@@ -835,6 +846,7 @@ class ScheduleSolver:
                     '时长': f"{sum(i['raw_hours'] for i in row_items)}h",
                     '科目 & 班级': merged_info,
                     '人数': unique_count,
+                    'display_count': display_count_str, # <--- 新增这一行
                     '涉及配套': merged_packages,
                     'display_items': display_list,
                     'sort_key_subject': row_items[0]['subject'] if row_items else ""
@@ -1130,9 +1142,11 @@ def save_history_to_disk(current_solutions):
         return
     
     # 1. 白名单过滤
+    # 1. 白名单过滤
     KEYS_TO_SAVE = [
         'name', 'status', 'solve_status', 'solve_time', 'icon', 
-        'analysis', 'class_details', 'slot_schedule', 'split_log'
+        'analysis', 'class_details', 'slot_schedule', 'split_log',
+        'source_filename' # <--- 新增白名单字段
     ]
     
     sanitized_solutions = []
@@ -1799,6 +1813,11 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             
             if result['status'] == 'success':
                 result['name'] = sol_config['name']
+                # === [新增功能] 记录源文件名 ===
+                # 获取当前文件名，如果未上传则标记为"历史数据"
+                src_file = st.session_state.get('last_uploaded_file', 'unknown')
+                result['source_filename'] = src_file
+                # ===========================
                 result['analysis'] = solver_instance.analyze_solution(result)
                 result['class_details'], result['slot_schedule'] = solver_instance.extract_timetable(result)
                 solutions.append(result)
@@ -2121,7 +2140,10 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 flow_html += '</div>'
                                 
                                 row_html += f"<td>{flow_html}</td>"
-                                row_html += f"<td class='col-count'>{item['人数']}</td>"
+                                # === [修改] 优先显示逗号分隔的字符串 ===
+                                display_cnt = item.get('display_count', item['人数'])
+                                row_html += f"<td class='col-count' style='font-size: 0.9em;'>{display_cnt}</td>"
+                                # ===================================
                                 
                                 pkg_slots = ["-", "-", "-"]
                                 
@@ -2366,10 +2388,18 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                                 adjusted_width = min(max_len + 4, 60)
                                 worksheet.column_dimensions[get_column_letter(idx + 1)].width = adjusted_width
                     
+                    # === [修改] 文件名加入原文件名 ===
+                    # 提取源文件名（去除后缀），如果太长截断一下
+                    src_name = sol.get('source_filename', 'data')
+                    if '.' in src_name: src_name = src_name.rsplit('.', 1)[0]
+                    
+                    final_filename = f"{src_name}_{sol['name'].replace('：', '_')}.xlsx"
+                    # ==============================
+
                     st.download_button(
                         label="📥 下载Excel文件",
                         data=output.getvalue(),
-                        file_name=f"{sol['name'].replace('：', '_')}_排课结果.xlsx",
+                        file_name=final_filename, # <--- 使用新变量
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                     
