@@ -927,7 +927,7 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
     min_student_count = min(enrollment.values())
     
     # 🔥🔥🔥 [核心修改] 新的最小班额算法 🔥🔥🔥
-    if min_student_count < 20:
+    if min_student_count > 10:
         raw_min = math.floor(min_student_count / current_max_classes)
         suggested_min_size = max(1, raw_min - 3)
     else:
