@@ -1161,8 +1161,8 @@ def save_history_to_disk(current_solutions):
         print("⚠️ 数据未变，跳过保存")
     
     # 4. 限制数量（保留最近10条）
-    if len(history) > 10:
-        history = history[-10:]
+    if len(history) > 3:
+        history = history[-3:]
         
     # 5. 写入
     try:
@@ -1205,16 +1205,14 @@ def main():
         st.markdown("---")
         st.subheader("📜 历史记录")
         st.caption("💡 **点击下方按钮加载**：无需上传配套即可查看历史记录")
-        st.caption(f"📊 保留最近 10 次记录 | 当前: {len(load_history_from_disk())} 条")
+        st.caption(f"📊 保留最近 3 次记录 | 当前: {len(load_history_from_disk())} 条")
         
         history_records = load_history_from_disk()
         
         if not history_records:
             st.caption("暂无历史记录")
         else:
-            # 倒序显示，最近的在最上面
             for idx, record in enumerate(reversed(history_records)):
-                # idx=0 是最后一场, idx=1 是倒数第二场
                 btn_label = f"📂 加载: {record['time']} (共{len(record['data'])}个方案)"
                 
                 # 使用唯一的 key 防止冲突
@@ -1239,33 +1237,6 @@ def main():
                     os.remove(HISTORY_FILE)
                     st.toast("✅ 历史记录已清空", icon="🗑️")
                     st.rerun()
-        
-        st.markdown("---")
-        st.subheader("💾 已保存的方案")
-        st.caption("⚠️ **注意**：在 Streamlit Cloud 上，保存的方案会在应用重启后丢失。如需永久保存，请下载Excel文件。")
-        
-        if st.session_state['saved_solutions']:
-            st.caption(f"✅ 当前共 {len(st.session_state['saved_solutions'])} 个方案")
-            for save_name in list(st.session_state['saved_solutions'].keys()):
-                saved_data = st.session_state['saved_solutions'][save_name]
-                with st.expander(f"📁 {save_name}"):
-                    st.caption(f"{saved_data['original_name']}")
-                    st.caption(f"{saved_data['timestamp']}")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("📥", key=f"view_{save_name}"):
-                            st.session_state['solutions'] = [saved_data['solution']]
-                            st.session_state['from_saved'] = True  # 标记来自保存方案
-                            st.toast(f"✅ 已加载方案: {save_name}", icon="📁")
-                            st.rerun()
-                    with col2:
-                        if st.button("🗑️", key=f"del_{save_name}"):
-                            delete_saved_solution(save_name)
-                            st.toast(f"🗑️ 已删除方案: {save_name}", icon="🗑️")
-                            st.rerun()
-        else:
-            st.caption("暂无保存")
         
         st.markdown("---")
         
@@ -1652,13 +1623,10 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         'min_class_size': min_class_size,
         'max_class_size': max_class_size,
         'max_classes_per_subject': max_classes_per_subject,
-        'num_slots': num_slots,  # <--- 补上这一行！
-        # 如果你之前加了并发功能，记得把这一行也加上，否则会报 'default_concurrency' 错误
+        'num_slots': num_slots, 
         'default_concurrency': st.session_state.get('default_concurrency', 1) if 'default_concurrency' in st.session_state else 1
-        # 或者如果你把并发输入框定义为了变量 default_concurrency，则写: 'default_concurrency': default_concurrency
     }
 
-    # --- 插入点：实时预检 ---
     if 'packages' in st.session_state:
         feasibility_issues = check_data_feasibility(
             st.session_state['packages'], 
