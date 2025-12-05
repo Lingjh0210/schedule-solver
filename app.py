@@ -930,12 +930,12 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
         # 最小班额 = (总人数 / 允许最大班数) - 3
         # 例如 90人 / 3 = 30 -> 建议 27
         raw_min = math.floor(min_student_count / current_max_classes)
-        suggested_min_size = max(1, raw_min - 3)
+        suggested_min_size = max(1, raw_min - 2)
     else:
         # 逻辑：如果人数很少(<=20)，通常只开1个班，或者不宜拆太碎
         # 最小班额 = 总人数 - 3
         # 例如 8人 -> 建议 5
-        suggested_min_size = max(1, min_student_count)
+        suggested_min_size = max(1, min_student_count-3)
     # 1. 最小班额 (保持不变)
 
 
