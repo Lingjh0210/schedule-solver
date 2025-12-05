@@ -1227,7 +1227,15 @@ def main():
             st.caption("暂无历史记录")
         else:
             for idx, record in enumerate(reversed(history_records)):
-                btn_label = f"📂 加载: {record['time']} (共{len(record['data'])}个方案)"
+                # === [修改] 尝试提取文件名 ===
+                # 取出第一个方案，查看其中是否保存了 source_filename
+                f_name = "旧数据/未知"
+                if record['data'] and len(record['data']) > 0:
+                    f_name = record['data'][0].get('source_filename', '未知文件')
+                
+                # 优化按钮显示的文字格式
+                btn_label = f"📂 {f_name}\n📅 {record['time']} ({len(record['data'])}个方案)"
+                # ===========================
                 
                 # 使用唯一的 key 防止冲突
                 if st.button(btn_label, key=f"hist_btn_{idx}", use_container_width=True):
@@ -1592,8 +1600,16 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             st.caption(f"自动显示最近 {len(display_records)} 次求解结果（无需上传配套）")
             
             for idx, record in enumerate(display_records):
-                with st.expander(f"📊 {record['time']} - 共 {len(record['data'])} 个方案", expanded=(idx==0)):
-                    # 显示方案对比表格
+                # === [修改] 提取文件名 ===
+                f_name = "未知文件"
+                if record['data'] and len(record['data']) > 0:
+                    f_name = record['data'][0].get('source_filename', '未知文件')
+                
+                # 修改 Expander 的标题
+                title_str = f"📊 {f_name} | 🕒 {record['time']} ({len(record['data'])}个方案)"
+                # =======================
+
+                with st.expander(title_str, expanded=(idx==0)):
                     comparison_data = []
                     for sol in record['data']:
                         if 'analysis' in sol:
