@@ -1197,10 +1197,7 @@ def main():
     
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #666;">走班制排课搜索系统</p>', unsafe_allow_html=True)
-    # ... (st.set_page_config 之后) ...
 
-    # [新增] 注入 JS 拦截刷新/关闭事件
-    # 这会在用户试图刷新页面时弹窗警告
     import streamlit.components.v1 as components
     components.html(
         """
@@ -1227,17 +1224,13 @@ def main():
             st.caption("暂无历史记录")
         else:
             for idx, record in enumerate(reversed(history_records)):
-                # === [修改] 尝试提取文件名 ===
-                # 取出第一个方案，查看其中是否保存了 source_filename
+
                 f_name = "旧数据/未知"
                 if record['data'] and len(record['data']) > 0:
                     f_name = record['data'][0].get('source_filename', '未知文件')
                 
-                # 优化按钮显示的文字格式
-                btn_label = f"📂 {f_name}\n📅 {record['time']} ({len(record['data'])}个方案)"
-                # ===========================
-                
-                # 使用唯一的 key 防止冲突
+                btn_label = f"📂 {f_name}\n{record['time']} ({len(record['data'])}个方案)"
+
                 if st.button(btn_label, key=f"hist_btn_{idx}", use_container_width=True):
                     # 加载历史记录
                     st.session_state['solutions'] = record['data']
