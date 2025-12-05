@@ -485,7 +485,7 @@ class ScheduleSolver:
             total_raw_penalty = 0    
             
             allowed_gap = 6      # 允许误差
-            scheme_c_max_size = self.config.get('dynamic_max_limit', 30)
+            scheme_c_max_size = self.config.get('dynamic_max_limit', 24)
 
 
             for k in self.subjects:
@@ -1716,7 +1716,7 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             solution_configs.append({'type': 'balanced', 'name': '方案B：全局均衡'})
             
         if "方案C: 精品小班 (强控30人)" in selected_schemes_ui:
-            solution_configs.append({'type': 'subject_balanced', 'name': '方案C：精品小班(上限30人)'})
+            solution_configs.append({'type': 'subject_balanced', 'name': '方案C：精品小班(上限24人)'})
             
         if "方案D: 自动拆分 (解决超大班)" in selected_schemes_ui:
             solution_configs.append({'type': 'auto_split', 'name': f'方案D：自动拆分(上限{scheme_d_limit}人)'})
