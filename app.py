@@ -925,12 +925,12 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
         return {}
 
     min_student_count = min(enrollment.values())
-    current_max_classes = 1
+     = 1
     if min_student_count > 9:
         # 逻辑：如果人数较多(>20)，则允许拆分。
         # 最小班额 = (总人数 / 允许最大班数) - 3
         # 例如 90人 / 3 = 30 -> 建议 27
-        raw_min = math.floor(min_student_count / current_max_classes)
+        raw_min = math.floor(min_student_count / assumed_max_classes)
         suggested_min_size = max(1, raw_min - 2)
     else:
         # 逻辑：如果人数很少(<=20)，通常只开1个班，或者不宜拆太碎
@@ -942,8 +942,7 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
 
     max_student_count = max(enrollment.values())
     
-    assumed_max_classes = 1
-
+    
     raw_max_size = math.ceil(max_student_count / assumed_max_classes)
     
     suggested_max_size = raw_max_size + 3
