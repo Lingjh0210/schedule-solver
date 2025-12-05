@@ -925,7 +925,7 @@ def calculate_smart_defaults(packages, subject_hours, default_concurrency=1):
         return {}
 
     min_student_count = min(enrollment.values())
-    if min_student_count > 20:
+    if min_student_count > 9:
         # 逻辑：如果人数较多(>20)，则允许拆分。
         # 最小班额 = (总人数 / 允许最大班数) - 3
         # 例如 90人 / 3 = 30 -> 建议 27
