@@ -1394,14 +1394,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
                  st.session_state['param_num_slots'] = calculate_recommended_slots(st.session_state['max_total_hours'])
              else:
                  st.session_state['param_num_slots'] = 10
-
-        num_slots = st.number_input(
-            "时段组数量", 
-            min_value=1, max_value=30, 
-            key="param_num_slots", # <--- 绑定到 Session State
-            step=1,
-            help="系统已根据总学时自动计算推荐值"
-        )
         
         # 智能推荐时段组数
         if 'max_total_hours' in st.session_state:
@@ -1423,14 +1415,6 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             default_slots = 10
             st.info("💡 上传数据后将自动推荐时段组数")
         
-        num_slots = st.number_input(
-            "时段组数量", 
-            min_value=1, 
-            max_value=20, 
-            value=default_slots, 
-            step=1,
-            help="系统会根据数据自动推荐，也可手动调整。最后一个时段组为3小时，其余为2小时"
-        )
         
         st.info("💡提示: 增加求解时间可得更优解，上限600")
         solver_timeout = st.number_input("求解超时(秒)", min_value=10, max_value=600, value=120, step=10)
