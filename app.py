@@ -379,7 +379,36 @@ class ScheduleSolver:
                     limit = self.config['max_classes_per_subject']
                 
                 model.Add(sum(y_rt[(k, r, t)] for r in range(1, self.config['max_classes_per_subject'] + 1)) <= limit)
-        
+
+        # ... (原有代码：并发限制约束) ...
+        # model.Add(sum(y_rt[(k, r, t)] for r in range(1, self.config['max_classes_per_subject'] + 1)) <= limit)
+
+        # === 🔥 新增：处理自定义互斥组 🔥 ===
+        if 'conflict_groups' in self.config:
+            for group in self.config['conflict_groups']:
+                group_subjects = group['subjects']
+                group_limit = group['limit'] # 通常是 1
+                
+                # 过滤掉不存在的科目（防止报错）
+                valid_subjects = [s for s in group_subjects if s in self.subjects]
+                
+                if not valid_subjects:
+                    continue
+                    
+                # 核心约束：对于每一个时间片 t
+                for t in self.TIME_SLOTS_1H:
+                    # 收集该组所有科目、所有班级在 t 时刻的开班状态变量
+                    active_vars_in_group = []
+                    for k in valid_subjects:
+                        for r in range(1, self.config['max_classes_per_subject'] + 1):
+                            active_vars_in_group.append(y_rt[(k, r, t)])
+                    
+                    # 约束：这些变量之和 <= group_limit
+                    # 意思是：在这个时刻，这组科目加起来只能开 limit 个班
+                    model.Add(sum(active_vars_in_group) <= group_limit)
+        # ====================================
+
+        # ... (原有代码：for p in self.package_names: ...) ...
         for p in self.package_names:
             for k in self.subjects:
                 if k in self.packages[p]['科目']:
@@ -1472,6 +1501,68 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
         else:
             forced_class_count = {}
             st.info("请先上传数据文件")
+
+        # ... (在 forced_class_count 也就是“强制开班”代码块的下方插入) ...
+
+        st.markdown("---")
+        st.subheader("🚫 互斥科目设置")
+        st.caption("定义不能同时上课的科目组（例如同一位老师教多门课）")
+
+        # 初始化互斥组 session state
+        if 'conflict_groups' not in st.session_state:
+            st.session_state['conflict_groups'] = []
+
+        #以此科目列表为准
+        if 'subject_hours' in st.session_state:
+            all_subjects = list(st.session_state['subject_hours'].keys())
+            
+            # 动态添加/删除组的逻辑
+            col_add, col_clear = st.columns([1, 1])
+            with col_add:
+                if st.button("➕ 添加互斥组", use_container_width=True):
+                    st.session_state['conflict_groups'].append({"subjects": [], "limit": 1})
+            with col_clear:
+                if st.button("🗑️ 清空所有", use_container_width=True):
+                    st.session_state['conflict_groups'] = []
+
+            # 渲染每个互斥组的设置
+            groups_to_remove = []
+            for idx, group in enumerate(st.session_state['conflict_groups']):
+                with st.container():
+                    st.markdown(f"**互斥组 {idx + 1}**")
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        # 多选框选择科目
+                        selected = st.multiselect(
+                            "选择科目",
+                            options=all_subjects,
+                            default=[s for s in group['subjects'] if s in all_subjects],
+                            key=f"conflict_subj_{idx}",
+                            label_visibility="collapsed",
+                            placeholder="选择不能并行的科目"
+                        )
+                        # 更新 state
+                        st.session_state['conflict_groups'][idx]['subjects'] = selected
+                    with c2:
+                        # 设置允许的最大并发数（通常是1，表示完全互斥）
+                        limit = st.number_input(
+                            "最大允许",
+                            min_value=1, max_value=5, value=group.get('limit', 1),
+                            key=f"conflict_limit_{idx}",
+                            label_visibility="collapsed",
+                            help="该组科目在同一时刻最多能开几个班？(同老师设为1)"
+                        )
+                        st.session_state['conflict_groups'][idx]['limit'] = limit
+                    
+                    if st.button("删除此组", key=f"del_group_{idx}"):
+                        groups_to_remove.append(idx)
+                    st.markdown("---")
+            
+            # 处理删除
+            for idx in reversed(groups_to_remove):
+                del st.session_state['conflict_groups'][idx]
+        else:
+            st.info("请先上传数据文件")
     
     # 主内容区
     # 如果既没有上传文件，也没有加载历史记录，显示使用说明
@@ -1654,7 +1745,8 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             'num_slots': num_slots,
             'allow_slot_split': allow_slot_split,
             'slot_split_penalty': slot_split_penalty,
-            'forced_class_count': forced_class_count
+            'forced_class_count': forced_class_count,
+            'conflict_groups': st.session_state.get('conflict_groups', []) 
         }
         
         solver_instance = ScheduleSolver(
