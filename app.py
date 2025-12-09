@@ -1444,7 +1444,12 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             default_slots = 10
             st.info("💡 上传数据后将自动推荐时段组数")
         
-        
+        num_slots = st.number_input(
+            "时段组数量", 
+            min_value=1, max_value=50, 
+            key="param_num_slots", # 绑定到 session_state
+            step=1
+        )
         st.info("💡提示: 增加求解时间可得更优解，上限600")
         solver_timeout = st.number_input("求解超时(秒)", min_value=10, max_value=600, value=120, step=10)
         
