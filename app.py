@@ -867,7 +867,7 @@ class ScheduleSolver:
                         'color_seed': item['subject'] if not item['is_gap'] else 'gap',
                         'is_gap': item['is_gap'],
                         'packages_str': item['packages_str'],
-                        'relative_slots': relative_slots # <--- 传递精确的格子索引
+                        'relative_slots': relative_slots
                     })
 
                 slot_schedule_data.append({
@@ -921,7 +921,7 @@ def check_data_feasibility(packages, subject_hours, config):
                 'detail': f"人数({total_students})无法被分配到1-{max_k}个班级中(班额{min_s}-{max_s})。",
                 'suggestion': "调整班额限制或最大班数。"
             })
-            continue # 人数都排不下，后面不用算了
+            continue 
 
 
         hours_per_class = subject_hours.get(subject, 0)
@@ -1211,7 +1211,6 @@ def save_history_to_disk(current_solutions):
     try:
         with open(HISTORY_FILE, 'wb') as f:
             pickle.dump(history, f)
-        # 在界面上显示个小绿标，证明运行到了这里
         st.toast(f"已保存到本地记录 ({timestamp})", icon="💾")
     except Exception as e:
         st.error(f"❌ 保存文件失败: {str(e)}")
@@ -1219,9 +1218,7 @@ def save_history_to_disk(current_solutions):
         
 # main design
 def main():
-    # 初始化 session_state 用于保存方案
     if 'saved_solutions' not in st.session_state:
-        # 从磁盘加载已保存的方案
         st.session_state['saved_solutions'] = load_saved_solutions_from_disk()
     
     st.markdown('<div class="main-header">📚 智能排课求解器</div>', unsafe_allow_html=True)
@@ -1662,25 +1659,36 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
 
                 with st.expander(title_str, expanded=(idx==0)):
                     comparison_data = []
-                    for sol in record['data']:
+                    for sol in st.session_state['solutions']:
+                        # 检查方案是否成功
                         if 'analysis' in sol:
                             analysis = sol['analysis']
+                            
+                            # === 🔥 修改开始：拼接图标和文字状态 🔥 ===
+                            status_display = f"{sol.get('icon', '')} {sol.get('solve_status', '未知')}"
+                            # ========================================
+            
                             comparison_data.append({
                                 '方案': sol['name'],
+                                '状态': status_display, # <--- 这里使用了新变量，同时显示图标和文字
                                 '开班数': analysis['total_classes'],
                                 '平均班额': f"{analysis['avg_size']}人",
                                 '班额范围': f"{analysis['min_size']}-{analysis['max_size']}人",
                                 '时段分割': analysis['split_count'],
-                                '状态': sol.get('icon', '✅')
+                                '求解时间': f"{sol.get('solve_time', 0):.1f}秒",
                             })
                         else:
+                            # 失败的方案
+                            status_display = f"{sol.get('icon', '❌')} {sol.get('solve_status', '失败')}"
+                            
                             comparison_data.append({
-                                '方案': sol.get('name', '未知'),
+                                '方案': sol.get('name', '未知方案'),
+                                '状态': status_display, # <--- 这里也同步修改
                                 '开班数': '-',
                                 '平均班额': '-',
                                 '班额范围': '-',
                                 '时段分割': '-',
-                                '状态': sol.get('icon', '❌')
+                                '求解时间': f"{sol.get('solve_time', 0):.1f}秒",
                             })
                     
                     if comparison_data:
