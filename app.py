@@ -1962,26 +1962,30 @@ P22,"生物（4）,化学（5）,经济（4）,地理（4）,AI应用（2）,AI�
             # 检查方案是否成功
             if 'analysis' in sol:
                 analysis = sol['analysis']
+                # 拼接状态
+                status_display = f"{sol.get('icon', '')} {sol.get('solve_status', '未知')}"
+                
                 comparison_data.append({
                     '方案': sol['name'],
+                    '状态': status_display, 
                     '开班数': analysis['total_classes'],
                     '平均班额': f"{analysis['avg_size']}人",
                     '班额范围': f"{analysis['min_size']}-{analysis['max_size']}人",
-                    '时段分割次数': analysis['split_count'],
+                    '时段分割': analysis['split_count'],
                     '求解时间': f"{sol.get('solve_time', 0):.1f}秒",
-                    '状态': sol.get('icon', '✅')
                 })
             else:
-                # 失败的方案
+                status_display = f"{sol.get('icon', '❌')} {sol.get('solve_status', '失败')}"
                 comparison_data.append({
                     '方案': sol.get('name', '未知方案'),
+                    '状态': status_display,
                     '开班数': '-',
                     '平均班额': '-',
                     '班额范围': '-',
-                    '时段分割次数': '-',
+                    '时段分割': '-',
                     '求解时间': f"{sol.get('solve_time', 0):.1f}秒",
-                    '状态': sol.get('icon', '❌')
                 })
+        # ==============================================================
         
         if comparison_data:
             df_comparison = pd.DataFrame(comparison_data)
